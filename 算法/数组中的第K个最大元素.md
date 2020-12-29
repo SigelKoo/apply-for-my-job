@@ -18,3 +18,45 @@ func findKthLargest(nums []int, k int) int {
 }
 ```
 
+```go
+type intHeap []int
+
+func (h intHeap) Len() int {
+	return len(h)
+}
+
+func (h intHeap) Less(i, j int) bool {
+	return h[i] <= h[j]
+}
+
+func (h intHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *intHeap) Push(x interface{}) {
+	*h = append(*h, x.(int))
+}
+
+func (h *intHeap) Pop() interface{} {
+	old := *h
+	l := len(old)
+	x := old[l - 1]
+	*h = old[0 : l - 1]
+	return x
+}
+
+func findKthLargest(nums []int, k int) int {
+	h := make(intHeap,0)
+	heap.Init(&h)
+	for i := 0; i < len(nums); i++ {
+		if h.Len() < k {
+			heap.Push(&h, nums[i])
+		} else if h.Len() == k && nums[i] > h[0] {
+			heap.Pop(&h)
+			heap.Push(&h, nums[i])
+		}
+	}
+	return h[0]
+}
+```
+
