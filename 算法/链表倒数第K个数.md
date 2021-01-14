@@ -62,4 +62,3 @@ func kthToLast(head *ListNode, k int) int {
 }
 ```
 
-...
