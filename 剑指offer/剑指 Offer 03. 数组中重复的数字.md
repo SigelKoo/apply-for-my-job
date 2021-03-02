@@ -8,7 +8,7 @@
 输出：2 或 3
 ```
 
-使用哈希表
+1. 使用哈希表
 
 ```go
 func findRepeatNumber(nums []int) int {
@@ -24,15 +24,15 @@ func findRepeatNumber(nums []int) int {
 }
 ```
 
-数组长度为n，数字在0~n-1范围内，只需判断下标i与nums[i]相等即可（都相等，说明没有重复元素）
+2. 数组长度为n，数字在0~n-1范围内，只需判断下标i与nums[i]相等即可（都相等，说明没有重复元素）
 
-i与nums[i]相等，继续向下扫描
+   i与nums[i]相等，继续向下扫描
 
-i与nums[i]不相等，先比较nums[i]与nums[nums[i]]的值：
+   i与nums[i]不相等，先比较nums[i]与nums[nums[i]]的值：
 
-​	nums[i]与nums[nums[i]]相等，返回nums[i]
+   ​	nums[i]与nums[nums[i]]相等，返回nums[i]
 
-​	nums[i]与nums[nums[i]]不相等，交换nums[i]与nums[nums[i]]，一直重复
+   ​	nums[i]与nums[nums[i]]不相等，交换nums[i]与nums[nums[i]]，一直重复
 
 ```go
 func findRepeatNumber(nums []int) int {
@@ -43,7 +43,7 @@ func findRepeatNumber(nums []int) int {
         if nums[i] == nums[nums[i]] {
             return nums[i];
         } else {
-            nums[i], nums[nums[i]] = nums[nums[i]], nums[i];
+            nums[i], nums[nums[i]] = nums[nums[i]], nums[i]
         }
     }
     return -1;
