@@ -1,1 +1,0 @@
-# 简述socket中select与epoll的使用场景以及区别，epoll中水平触发以及边缘触发有什么不同
