@@ -176,3 +176,37 @@ string 擅长的场景：
 - 需要切片操作的场景；
 
 虽然看起来string适用的场景不如[]byte多，但因为string直观，在实际应用中还是大量存在，在偏底层的实现中[]byte使用更多。
+
+### []byte与string之间高效转换
+
+可以使用unsafe.Point()指针直接转换
+
+首先看string和[]byte 的底层结构
+
+```go
+struct string {
+    unit8 *str
+    int len
+}
+
+struct uint8 {
+    unit8 *array
+    int len
+    int cap
+}
+```
+
+通过对比 string 和 []byte 的结构体可知，[]byte 转换成 string 是可以直接使用 unsafe.Point(&b) 这样直接转换的。而string 则不可以直接转换成 []byte。 而需要构造把 string 的 str 指针赋值给 array 指针，把string 的 len 赋值给 []byte 的 len 和 cap。
+
+```go
+func bytes2str(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
+}
+
+func str2bytes(s string) []byte {
+	x := (*[2]uintptr)(unsafe.Pointer(&s)) // 获取s的起始地址开始后的两个 uintptr 指针
+	h := [3]uintptr{x[0], x[1], x[1]}  // 构造三个指针数组
+	return *(*[]byte)(unsafe.Pointer(&h))
+}
+```
+
