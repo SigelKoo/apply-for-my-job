@@ -23,16 +23,20 @@
 
 ```go
 func buildTree(preorder []int, inorder []int) *TreeNode {
-	for k := range inorder {
-		if preorder[0] == inorder[k] {
-			return &TreeNode{
-				Val: preorder[0],
-				Left: buildTree(preorder[1 : k + 1], inorder[0 : k]),
-				Right: buildTree(preorder[k + 1 :], inorder[k + 1 :]),
-			}
+	if len(preorder) == 0 || len(inorder) == 0 {
+		return nil
+	}
+	root := TreeNode{Val: preorder[0], Left: nil, Right: nil}
+	index := 0
+	for i := 0; i < len(inorder); i++ {
+		if preorder[0] == inorder[i] {
+			index = i
+			break
 		}
 	}
-	return nil
+	root.Left = buildTree(preorder[1:index + 1], inorder[0:index])
+	root.Right = buildTree(preorder[index + 1:], inorder[index + 1:])
+	return &root
 }
 ```
 
