@@ -39,3 +39,29 @@ func min63(a int, b int) int {
 }
 ````
 
+蛮力法，易于想象
+
+```go
+func maxProfit(prices []int) int {
+    maxProfit := 0
+
+    for i := 0; i < len(prices); i++ {
+        for j := i; j < len(prices); j++ {
+            maxProfit = max(maxProfit, prices[j] - prices[i])
+        }
+    }
+    if maxProfit > 0 {
+        return maxProfit
+    } else {
+        return 0
+    }
+}
+
+func max(a int, b int) int {
+    if a > b {
+        return a
+    }
+    return b
+}
+```
+

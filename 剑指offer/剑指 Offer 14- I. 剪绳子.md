@@ -14,53 +14,26 @@
 解释: 10 = 3 + 3 + 4, 3 × 3 × 4 = 36
 ```
 
-长度为2的绳子，可以剪成11，面积为1
-
-长度为3的绳子，可以剪成21/111，面积为2/1，故长度为3的不再划分为111
-
-长度为4的绳子，可以剪成31/211/1111/22
-
-剪一次后会变成两个子问题
-
-长度为5的绳子，dp[5] = dp[1] * dp[4]
-
-​                             dp[5] = dp[2] * dp[3]
-
-长度为n的绳子，dp[n] = dp[i] * dp[n - i]
-
 ```go
 func cuttingRope(n int) int {
-    // dp数组，值存长度为n进行切分的乘积是多少
     dp := make([]int, n + 1)
-    // 小于2，不能切分，乘积为1
-    if n < 2 {
-        return 1
-    }
-    // 等于2，切分为11，乘积为1
-    if n == 2 {
-        return 1
-    }
-    // 等于3，切分为12，乘积为2
-    if n == 3 {
-        return 2
-    }
-    // >= 4, 23不切分
-    dp[1] = 1
-    dp[2] = 2
-    dp[3] = 3
-    for i := 4; i <= n; i++ {
-        for j := 1; j <= i / 2; j++ {
-            dp[i] = max(dp[i], dp[j] * dp[i - j])
+    dp[0], dp[1], dp[2] = 0, 1, 1
+    for i := 3; i <= n; i++ {
+        for j := 2; j < i; j++ {
+            dp[i] = max(dp[i], dp[i - j] * j, (i - j) * j)
         }
     }
     return dp[n]
 }
 
-func max(a, b int) int{
-	if a > b {
-		return a
-	}
-	return b
+func max(a int, b int, c int) int {
+    if a >= b && a >= c {
+        return a
+    } else if b >= a && b >= c {
+        return b
+    } else {
+        return c
+    }
 }
 ```
 

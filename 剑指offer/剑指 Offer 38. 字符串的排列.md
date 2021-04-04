@@ -11,29 +11,41 @@
 
 ```go
 func permutation(s string) []string {
-    return getString(s)
+	res := make(map[string]bool, 0)
+	ss := []rune(s)
+	dfs38(ss, res, []int{}, len(ss))
+	list := []string{}
+	for k, _ := range res {
+		list = append(list, k)
+	}
+	return list
 }
 
-func getString(s string) []string {
-    var ret []string
-    if len(s) == 0 {
-        return ret
-    }
-    if len(s) == 1 {
-        ret = append(ret, s)
-        return ret
-    }
-    maps := make(map[string]bool)
-    for i, val := range s {
-        if maps[string(val)] == false {
-            maps[string(val)] = true
-            var tmp string
-            tmp = s[0:i] + s[i+1:]
-            for _, v := range getString(tmp) {
-                ret = append(ret, string(val) + v)
-            }
-        }
-    }
-    return ret
+func dfs38(ss []rune, res map[string]bool, used []int, n int) {
+	if len(used) == n {
+		r := []rune{}
+		for _, v := range used {
+			r = append(r, ss[v])
+		}
+		res[string(r)] = true
+		return
+	}
+	for i := range ss {
+		if listContain(used, i) {
+			continue
+		}
+		used = append(used, i)
+		dfs38(ss, res, used, n)
+		used = used[:len(used) - 1]
+	}
+}
+
+func listContain(used []int, a int) bool {
+	for _, v := range used {
+		if a == v {
+			return true
+		}
+	}
+	return false
 }
 ```
