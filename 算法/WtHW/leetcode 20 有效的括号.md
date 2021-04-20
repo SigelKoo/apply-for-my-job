@@ -30,7 +30,29 @@
 输出：true
 ```
 
-```
-
+```go
+func isValid(s string) bool {
+    length := len(s)
+    if length % 2 == 1 {
+        return false
+    }
+    hashtable := map[byte]byte {
+        ')': '(', 
+        ']': '[', 
+        '}': '{', 
+    }
+    stack := make([]byte, 0)
+    for i := 0; i < length; i++ {
+        if hashtable[s[i]] > 0 {
+            if len(stack) == 0 || hashtable[s[i]] != stack[len(stack) - 1] {
+                return false
+            }
+            stack = stack[: len(stack) - 1]
+        } else {
+            stack = append(stack, s[i])
+        }
+    }
+    return len(stack) == 0
+}
 ```
 
