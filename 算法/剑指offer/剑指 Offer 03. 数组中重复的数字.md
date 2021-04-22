@@ -19,5 +19,5 @@ func findRepeatNumber(nums []int) int {
 	}
 	return -1
 }
-
 ```
+

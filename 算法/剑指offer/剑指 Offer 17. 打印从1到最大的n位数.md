@@ -9,15 +9,15 @@
 
 ```
 func printNumbers(n int) []int {
-	res := make([]int, 0)
-	if n == 0 {
-		return res
-	}
-	end := math.Pow(10, float64(n))
-	for i := 1; i < int(end); i++ {
-		res = append(res, i)
-	}
-	return res
+    res := []int{}
+    num := 1
+    for i := 0; i < n; i++ {
+        num = num * 10
+    }
+    for i := 1; i < num; i++ {
+        res = append(res, i)
+    }
+    return res
 }
 ```
 

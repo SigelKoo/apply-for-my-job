@@ -16,20 +16,18 @@
 
 ```go
 func deleteNode(head *ListNode, val int) *ListNode {
-	if head.Val == val {
-		return head.Next
-	}
-	prev := head
-	curr := head.Next
-	for curr != nil {
-		if curr.Val == val {
-			prev.Next = curr.Next
-			return head
-		}
-		prev = curr
-		curr = curr.Next
-	}
-	return head
+    dummy := &ListNode{Next: head}
+    prev := dummy
+    curr := head
+    for curr != nil {
+        if curr.Val == val {
+            prev.Next = curr.Next
+        } else {
+            prev = curr
+        }
+        curr = curr.Next
+    }
+    return dummy.Next
 }
 ```
 

@@ -12,12 +12,14 @@
 
 ```GO
 func missingNumber(nums []int) int {
-	for i := 0; i < len(nums); i++ {
-		if nums[i] != i {
-			return nums[i] - 1
-		}
-	}
-	return nums[len(nums) - 1] + 1
+    res := len(nums)
+    for k, v := range nums {
+        if v != k {
+            res = k
+            break
+        }
+    }
+    return res
 }
 ```
 

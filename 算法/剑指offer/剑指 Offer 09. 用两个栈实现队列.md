@@ -17,54 +17,46 @@
 ```
 
 ```go
+type stack []int
+
+func (s stack) Len() int {
+	return len(s)
+}
+
+func (s *stack) Push(value int) {
+	*s = append(*s, value)
+}
+
+func (s *stack) Pop() int {
+	n := s.Len() - 1
+	x := (*s)[n]
+	*s = (*s)[: n]
+	return x
+}
+
 type CQueue struct {
-    // 栈 A，用于添加元素
-    stackA []int
-    // 栈 B，用于取出元素
-    stackB []int
+	in stack
+	out stack
 }
 
-// CQueue 的构造函数
 func Constructor() CQueue {
-    // 返回一个新的 CQueue
-    return CQueue{}
+	return CQueue{}
 }
 
-// 往队列插入整数
 func (this *CQueue) AppendTail(value int)  {
-    // 在 stackA 的末尾追加 value
-    this.stackA = append(this.stackA, value)
+	this.in.Push(value)
 }
 
-// 从队列取出整数并删除
 func (this *CQueue) DeleteHead() int {
-    // 如果 stackB 没有元素则从 stackA 中取出所有
-    if len(this.stackB) == 0 {
-        // 如果 stackA 里也没有元素，则队列爲空返回 -1
-        if len(this.stackA) == 0 {
-            return -1
-        }
-        // 将 stackA 的所有元素转移到 stackB
-        for len(this.stackA) > 0 {
-            // 获取 stackA 最末尾元素的下标
-            index := len(this.stackA) - 1
-            // 获取 stackA 最末尾元素的值 value
-            value := this.stackA[index]
-            // 向 stackB 的末尾追加 value
-            this.stackB = append(this.stackB, value)
-            // 从 stackA 中裁剪出末尾元素
-            this.stackA = this.stackA[:index]
-        }
-    }
-    // 这时候表示 stackB 内已有元素
-    // 获取 stackB 最末尾元素的下标
-    index := len(this.stackB) - 1
-    // 获取 stackB 最末尾元素的值 value
-    value := this.stackB[index]
-    // 从 stackB 中裁剪出末尾元素
-    this.stackB = this.stackB[:index]
-    // 返回 value
-    return value
+	if this.out.Len() != 0 {
+		return this.out.Pop()
+	} else if this.in.Len() != 0 {
+		for this.in.Len() != 0 {
+			this.out.Push(this.in.Pop())
+		}
+		return this.out.Pop()
+	}
+	return -1
 }
 ```
 

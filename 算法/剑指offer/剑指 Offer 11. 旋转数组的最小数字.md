@@ -12,7 +12,7 @@
 输出：0
 ```
 
-1. 二分法
+二分法
 
 ```go
 func minArray(numbers []int) int {
@@ -38,13 +38,4 @@ mid < high，说明最小值在前半段，将high赋值为mid；
 mid > high，说明最小值在后半段，将low赋值为mid + 1；
 
 mid == high，顺序向前移动即可，high--
-
-2. 排序后再查找
-
-```go
-func minArray(numbers []int) int {
-    sort.Ints(numbers)
-    return numbers[0]
-}
-```
 
