@@ -2,6 +2,16 @@
 
 channel是Golang在语言层面提供的goroutine间的通信方式，比Unix管道更易用也更轻便。channel主要用于进程内各goroutine间通信。
 
+#### 线程安全
+
+通过通信共享内存（channel），而不是通过共享内存而通信（sync.Mutex）
+
+  * channel本质就是一个数据结构，队列
+  * 数据是先进先出（FIFO： first in first out）
+  * 线程安全，多goroutine访问时，不需要加锁，就是说channel本身就是线程安全的
+  * channel 是线程安全的，多个协程操作同一个管道时，不会发生资源竞争问题
+  * 发送一个数据到Channel和从Channel接收一个数据都是原子性的。channel内部维护了一个互斥锁，来保证线程安全
+
 ### chan数据结构
 
 `src/runtime/chan.go:hchan`定义了channel的数据结构：

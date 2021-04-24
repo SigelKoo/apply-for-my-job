@@ -1,0 +1,91 @@
+MVCC (Multi-Version Concurrency Control) (注：与MVCC相对的，是基于锁的并发控制，Lock-Based Concurrency Control)是一种基于多版本的并发控制协议，只有在InnoDB引擎下存在。MVCC是为了实现事务的隔离性，通过版本号，避免同一数据在不同事务间的竞争，你可以把它当成基于多版本号的一种乐观锁。当然，这种乐观锁只在事务级别未提交锁和已提交锁时才会生效。MVCC最大的好处，相信也是耳熟能详：读不加锁，读写不冲突。在读多写少的OLTP应用中，读写不冲突是非常重要的，极大的增加了系统的并发性能。
+
+![img](https://upload-images.jianshu.io/upload_images/25449881-69494b50bfb077dd.png?imageMogr2/auto-orient/strip|imageView2/2/format/webp)
+
+InnoDB在每行数据都增加三个隐藏字段
+
+1. 一个 6字节的 DB_TRX_ID 字段 即:通常在其他文章中看到的 事务id
+
+2. 一个7字节的 DB_ROLL_PTR 字段 即:通常范围以回滚指针
+
+3. 一个 6字节的 DB_ROW_ID 字段
+
+
+
+### 底层原理
+
+#### 事务id
+
+首先我们说明一下 mysql 事务id 的生成时机，当我们开启一个事务的时候，并不会立刻生成事务id，而是执行增删改的时候才会生成 id，事务id 累加。
+
+1. 我们在前三个事务开始 都执行了一个不相干的 update，保证 事务id 生成
+
+2. 为了保证文章的可读性，我们分别把事务id 记录为 100,200,和300
+
+3. 最后两列因为开启事务后，没有执行 增删改 所以不会有事务id生成
+
+![img](https://upload-images.jianshu.io/upload_images/25449881-8adb90981b085290.png?imageMogr2/auto-orient/strip|imageView2/2/format/webp)
+
+#### Read-View
+
+当我们开启一个select 的事务时 (例如上图第四列), mysql 底层会在第一次执行select 时 生成一个 read-view ,它是 由当前所有 未提交的事务id + 已提交事务id 的最大值组成
+
+例如 在 上图中 ① 的位置 , 此时 mysql 地城会生成一个 read-view =[100,200],300 ,同时 在该事务中一单read-view 生成,该事务的read-view 将不会改变,除非事务提交.
+
+![img](https://upload-images.jianshu.io/upload_images/25449881-5f05efc262addde0.png?imageMogr2/auto-orient/strip|imageView2/2/w/1200/format/webp)
+
+可以预见: 最后一列的事务的read-view =[200],300
+
+![img](https://upload-images.jianshu.io/upload_images/25449881-0ad23582bea62b86.png?imageMogr2/auto-orient/strip|imageView2/2/w/1200/format/webp)
+
+#### undo log
+
+当我们执行 增删改时 其实并不是 真的把之前的数据删除了,而是 使用日志记录到了 undo log 中.
+
+>insert 操作, 底层会把记录先写入 undo log 中,提交时在写入对应的空间
+>
+>delete,底层并不会会把记录直接删除,而是把原来的数据复制一份到 undolog 中,并记录一个删除字段为true (不属于文章开头说的三个字段)
+>
+>对于update 操作,如果我们对同一条数据进行了多次更新操作,则 在undo log 中将存在多分他们之间用DB_ROLL_PTR 字段 关联 如下图:
+
+![img](https://upload-images.jianshu.io/upload_images/25449881-bb15f2884da8a8bf.png?imageMogr2/auto-orient/strip|imageView2/2/w/1200/format/webp)
+
+#### 数据可视性原则
+
+上面提到, 当进行增删改时 ,原来的数据并不会删除undo log 中 存放了很多 "待提交数据",那么当我们查询时底层是怎么决定哪些数据显示,哪些不显示呢? 我们来聊一下 mysql mvcc的显示规则
+
+首先, mysql 把数据分为三种状态
+
+![img](https://upload-images.jianshu.io/upload_images/25449881-870dbb69d4b819b8.png?imageMogr2/auto-orient/strip|imageView2/2/format/webp)
+
+显示数据的显示规则很明确
+
+> 1. 当前事务开启时已经提交的数据, 对当前事务的查询是可以查询到的 (灰色部分)
+>
+> 2. 比当前事务开启晚的事务提交的数据,对当前事务的查询是不可见的(红色部分)
+>
+> 3. 比当前事务开启的早,但是数据在当前事务开启前并未提交, 这部分数据对当前事务不可见
+>
+> 4. 事务自己提交的数据,自己可见
+
+这里我们对 read view 做一个 概念上的划分
+
+**min_trx_ids:** 我们把 readview 生成时所有未提交的 事务id 叫做 min_trx_ids(是一个数组),
+
+**max_trx_ids:** readview 生成时系统中最大的事务id 叫做max_trx_ids
+
+**creator_trx_id**: 把当前事务的id 叫做creator_trx_id
+
+![img](https://upload-images.jianshu.io/upload_images/25449881-07b284f2edc5e18d.png?imageMogr2/auto-orient/strip|imageView2/2/format/webp)
+
+![img](https://upload-images.jianshu.io/upload_images/25449881-7c61b3cbd29bd9fc.png?imageMogr2/auto-orient/strip|imageView2/2/format/webp)
+
+1. 如果被访问版本的trx_id属性值与ReadView中的creator_trx_id值相同，意味着当前事务在访问它自己修改过的记录，所以该版本可以被当前事务访问。
+
+2. 如果被访问版本的trx_id属性值小于ReadView中的min_trx_id值，表明生成该版本的事务在当前事务生成ReadView前已经提交，所以该版本可以被当前事务访问。
+
+3. 如果被访问版本的trx_id属性值大于ReadView中的max_trx_id值，表明生成该版本的事务在当前事务生成ReadView后才开启，所以该版本不可以被当前事务访问。
+
+4. 如果被访问版本的trx_id属性值在ReadView的min_trx_id和max_trx_id之间，那就需要判断一下trx_id属性值是不是在m_ids列表中，如果在，说明创建ReadView时生成该版本的事务还是活跃的，该版本不可以被访问；如果不在，说明创建ReadView时生成该版本的事务已经被提交，该版本可以被访问。
+
+**mysql mvcc 底层通过 比对 read-view 中的事务id 来判断 undo log中的 数据对当前事务是否可见**

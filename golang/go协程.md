@@ -14,3 +14,84 @@ go的协程依赖于线程进行
 | 任务调度     | 由内核实现，抢占方式，依赖各种锁                             | 由用户态的实现的具体调度器进行。例如 go 协程的调度器         |
 | 语音支持程度 | 绝大部分编程语言                                             | 部分语言：Lua，Go，Python ...                                |
 | 实现规范     | 按照现代操作系统规范实现                                     | 无统一规范。在用户态由开发者实现，高度自定义，比如只支持单线程的线程。不同的调度策略，等等 |
+
+#### 底层实现
+
+首先是与栈相关的两个字段：
+
+```go
+type g struct {
+	stack       stack
+	stackguard0 uintptr
+}
+```
+
+其中 `stack` 字段描述了当前 Goroutine 的栈内存范围 [stack.lo, stack.hi)，另一个字段 `stackguard0` 可以用于调度器抢占式调度。
+
+Goroutine 中还包含另外三个与抢占密切相关的字段：
+
+```go
+type g struct {
+	preempt       bool // 抢占信号
+	preemptStop   bool // 抢占时将状态修改成 `_Gpreempted`
+	preemptShrink bool // 在同步安全点收缩栈
+}
+```
+
+Goroutine 与我们在前面章节提到的 `defer` 和 `panic` 也有千丝万缕的联系，每一个 Goroutine 上都持有两个分别存储 `defer` 和 `panic` 对应结构体的链表：
+
+```go
+type g struct {
+	_panic       *_panic // 最内侧的 panic 结构体
+	_defer       *_defer // 最内侧的延迟函数结构体
+}
+```
+
+其他字段
+
+```go
+type g struct {
+	m              *m
+	sched          gobuf
+	atomicstatus   uint32
+	goid           int64
+}
+```
+
+- `m` — 当前 Goroutine 占用的线程，可能为空；
+- `atomicstatus` — Goroutine 的状态；
+- `sched` — 存储 Goroutine 的调度相关的数据；
+- `goid` — Goroutine 的 ID，该字段对开发者不可见，Go 团队认为引入 ID 会让部分 Goroutine 变得更特殊，从而限制语言的并发能力
+
+上述四个字段中，我们需要展开介绍 `sched` 字段的 `runtime.gobuf`结构体中包含哪些内容：
+
+```go
+type gobuf struct {
+	sp   uintptr
+	pc   uintptr
+	g    guintptr
+	ret  sys.Uintreg
+	...
+}
+```
+
+- `sp` — 栈指针；
+- `pc` — 程序计数器；
+- `g` — 持有 `runtime.gobuf`的 Goroutine；
+- `ret` — 系统调用的返回值；
+
+这些内容会在调度器保存或者恢复上下文的时候用到，其中的栈指针和程序计数器会用来存储或者恢复寄存器中的值，改变程序即将执行的代码。
+
+结构体 `runtime.g` 的 `atomicstatus` 字段存储了当前 Goroutine 的状态。除了几个已经不被使用的以及与 GC 相关的状态之外，Goroutine 可能处于以下 9 种状态：
+
+| 状态          | 描述                                                         |
+| ------------- | ------------------------------------------------------------ |
+| `_Gidle`      | 刚刚被分配并且还没有被初始化                                 |
+| `_Grunnable`  | 没有执行代码，没有栈的所有权，存储在运行队列中               |
+| `_Grunning`   | 可以执行代码，拥有栈的所有权，被赋予了内核线程 M 和处理器 P  |
+| `_Gsyscall`   | 正在执行系统调用，拥有栈的所有权，没有执行用户代码，被赋予了内核线程 M 但是不在运行队列上 |
+| `_Gwaiting`   | 由于运行时而被阻塞，没有执行用户代码并且不在运行队列上，但是可能存在于 Channel 的等待队列上 |
+| `_Gdead`      | 没有被使用，没有执行代码，可能有分配的栈                     |
+| `_Gcopystack` | 栈正在被拷贝，没有执行代码，不在运行队列上                   |
+| `_Gpreempted` | 由于抢占而被阻塞，没有执行用户代码并且不在运行队列上，等待唤醒 |
+| `_Gscan`      | GC 正在扫描栈空间，没有执行代码，可以与其他状态同时存在      |
