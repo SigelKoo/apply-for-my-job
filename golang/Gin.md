@@ -16,12 +16,7 @@ $ go get gopkg.in/gin-gonic/gin.v1
 import "gopkg.in/gin-gonic/gin.v1"
 ```
 
-
-<a name="arch"></a>
-
 ### 框架架构
-
-<a name="http"></a>
 
 - HTTP 服务器
 
@@ -106,19 +101,11 @@ log.Println("Server exiting")
 
 完整的代码见 [graceful-shutdown](https://github.com/gin-gonic/gin/blob/master/examples/graceful-shutdown/graceful-shutdown/server.go).
 
-<a name="life-circle"></a>
-
 - 生命周期
-
-<a name="context"></a>
 
 - Context
 
-<a name="router"></a>
-
 ### 路由
-
-<a name="basic-router"></a>
 
 - 基本路由
   gin 框架中采用的路由库是 httprouter。
@@ -139,8 +126,6 @@ log.Println("Server exiting")
 	router.HEAD("/someHead", head)
 	router.OPTIONS("/someOptions", options)
 ```
-
-<a name="router-param"></a>
 
 - 路由参数
 
@@ -180,8 +165,6 @@ router.POST("/form", func(c *gin.Context) {
 })
 ```
 
-<a name="router-group"></a>
-
 - 路由群组
 
 ```go
@@ -192,11 +175,7 @@ router.POST("/form", func(c *gin.Context) {
 	}
 ```
 
-<a name="controller"></a>
-
 ### 控制器
-
-<a name="binding"></a>
 
 - 数据解析绑定
 
@@ -259,23 +238,13 @@ func main() {
 }
 ```
 
-<a name="request"></a>
-
 ### 请求
-
-<a name="request-header"></a>
 
 - 请求头
 
-<a name="request-params"></a>
-
 - 请求参数
 
-<a name="request-cookie"></a>
-
 - Cookies
-
-<a name="upload"></a>
 
 - 上传文件
 
@@ -297,27 +266,17 @@ router.POST("/upload", func(c *gin.Context) {
 })
 ```
 
-<a name="response"></a>
-
 ### 响应
-
-<a name="response-header"></a>
 
 - 响应头
 
-<a name="response-cookie"></a>
-
 - 附加Cookie
-
-<a name="response-string"></a>
 
 - 字符串响应
 
 ```
 c.String(http.StatusOK, "some string")
 ```
-
-<a name="response-json"></a>
 
 - JSON/XML/YAML响应
 
@@ -343,8 +302,6 @@ r.GET("/moreJSON", func(c *gin.Context) {
 })
 		
 ```
-
-<a name="response-view"></a>
 
 - 视图响应
 
@@ -416,8 +373,6 @@ func main() {
 }
 ```
 
-<a name="response-file"></a>
-
 - 文件响应
 
 ```
@@ -430,8 +385,6 @@ router.StaticFile("/favicon.ico", "./resources/favicon.ico")
 
 ```
 
-<a name="response-redirect"></a>
-
 - 重定向
 
 ```
@@ -440,8 +393,6 @@ r.GET("/redirect", func(c *gin.Context) {
     c.Redirect(http.StatusMovedPermanently, "http://www.baidu.com/")
 })
 ```
-
-<a name="sync-async"></a>
 
 - 同步异步
 
@@ -474,23 +425,13 @@ func main() {
 }
 ```
 
-<a name="view"></a>
-
 ### 视图
-
-<a name="view-param"></a>
 
 - 传参
 
-<a name="view-unit"></a>
-
 - 视图组件
 
-<a name="middleware"></a>
-
 ### 中间件
-
-<a name="middleware-use"></a>
 
 - 分类使用方式
 
@@ -511,8 +452,6 @@ authorized.Use(MyMiddelware())
 	authorized.POST("/login", loginEndpoint)
 }
 ```
-
-<a name="middleware-create"></a>
 
 - 自定义中间件
 
@@ -556,8 +495,6 @@ func main() {
 }
 ```
 
-<a name="middleware-param"></a>
-
 - 中间件参数
 
 - 内置中间件
@@ -599,11 +536,8 @@ func main() {
 ```
 
 2.
-<a name="db"></a>
 
 ## 数据库
-
-<a name="db-mongodb"></a>
 
 - Mongodb
 
@@ -653,19 +587,11 @@ router.GET("/mongo", func(context *gin.Context){
 })
 ```
 
-<a name="db-mysql"></a>
-
 - Mysql
-
-<a name="ORM"></a>
 
 - ORM
 
-<a name="extensions"></a>
-
 ## 扩展包
-
-<a name="functions"></a>
 
 ### 常用方法
 

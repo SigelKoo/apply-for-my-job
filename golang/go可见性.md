@@ -1,5 +1,3 @@
-
-
 Go语言的内存模型规定了一个goroutine可以看到另外一个goroutine修改同一个变量的值的条件
 
 当多个goroutine并发同时存取同一个数据时候必须把并发的存取的操作顺序化，在go中可以实现操作顺序化的工具有高级的通道（channel）通信和同步原语比如sync包中的Mutex(互斥锁)、RWMutex(读写锁)或者和sync/atomic中的原子操作。
