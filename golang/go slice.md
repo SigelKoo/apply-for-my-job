@@ -105,7 +105,18 @@ func makeslice64(et *_type, len64, cap64 int64) slice {
 
 用 make 函数创建的一个 len = 4， cap = 6 的切片。内存空间申请了6个 int 类型的内存大小。由于 len = 4，所以后面2个暂时访问不到，但是容量还是在的。这时候数组里面每个变量都是0 。
 
-### nil和空切片
+### 零切片、nil切片和空切片
+
+零切片只是表示底层数组的二进制内容都是零。
+
+```go
+var s = make([]int, 10)
+fmt.Println(s)
+
+[0 0 0 0 0 0 0 0 0 0]
+```
+
+nil切片
 
 ```go
 var slice []int
@@ -113,7 +124,7 @@ var slice []int
 
 nil 切片被用在很多标准库和内置函数中，描述一个不存在的切片的时候，就需要用到 nil 切片。比如函数在发生异常的时候，返回的切片就是 nil 切片。nil 切片的指针指向 nil。
 
-空切片一般会用来表示一个空的集合。比如数据库查询，一条结果也没有查到，那么就可以返回一个空切片。
+空切片一般会用来表示一个空的集合。比如数据库查询，一条结果也没有查到，那么就可以返回一个空切片。所有空切片的数组指针指向824634199592。
 
 ```go
 silce := make( []int , 0 )
@@ -394,3 +405,51 @@ value = 40 , value-addr = c4200aedf8 , slice-addr = c4200b0338
 从上面结果我们可以看到，如果用 range 的方式去遍历一个切片，拿到的 Value 其实是切片里面的值拷贝。所以每次打印 Value 的地址都不变。
 
 由于 Value 是值拷贝的，并非引用传递，所以直接改 Value 是达不到更改原切片值的目的的，需要通过 `&slice[index]` 获取真实的地址。
+
+### slice深拷贝和浅拷贝
+
+浅拷贝是源切片和目的切片共享同一底层数组空间，源切片修改，目的切片页同样被修改。
+
+```go
+  slice1 := make([]int, 5, 5)
+  slice2 := slice1
+  slice1[1] = 1
+  fmt.Println(slice1) //[0 1 0 0 0]
+  fmt.Println(slice2) //[0 1 0 0 0]
+```
+
+深拷贝是源切片和目的切片各自都有彼此独立的底层数组空间，各自的修改，彼此不受影响
+
+```go
+  slice1 := make([]int, 5, 5)
+  slice1[0]=9
+  slice2 := make([]int, 4, 4)
+  slice3 := make([]int, 5, 5)
+  //拷贝
+  fmt.Println(copy(slice2, slice1))//4
+  fmt.Println(copy(slice3, slice1))//5
+  //独立修改
+  slice2[1] = 2
+  slice3[1] = 3
+  fmt.Println(slice1)//[9 0 0 0 0 0]
+  fmt.Println(slice2)//[9 2 0 0]
+  fmt.Println(slice3)//[9 3 0 0 0]
+```
+
+### 在for循环里append元素
+
+```go
+ s := []int{1,2,3,4,5}
+ for _, v:=range s {
+  s =append(s, v)
+  fmt.Printf("len(s)=%v\n",len(s))
+ }
+```
+
+**不会死循环**，`for range`其实是`golang`的`语法糖`，在循环开始前会获取切片的长度 `len(切片)`，然后再执行`len(切片)`次数的循环。
+
+### for循环select时，如果通道已经关闭会怎么样？如果select中的case只有一个，又会怎么样？
+
+- for循环select时，如果其中一个case通道已经关闭，则每次都会执行到这个case。
+- 如果select里边只有一个case，而这个case被关闭了，则会出现死循环。
+

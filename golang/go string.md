@@ -62,7 +62,6 @@ byte切片可以很方便的转换成string，如下所示：
 func GetStringBySlice(s []byte) string {
     return string(s)
 }
-
 ```
 
 需要注意的是这种转换需要一次内存拷贝。
