@@ -21,5 +21,46 @@ LRU又称为最近最久未使用置换算法，每次淘汰的页面是最近�
 
 通常通过哈希表和双链表进行实现，使用List保存数据，Map来做快速访问即可
 
-https://blog.csdn.net/xcl168/article/details/43452373?utm_source=itdadao&utm_medium=referral
+```go
+package main
+
+import "container/list"
+
+type entry struct {
+	key, value int
+}
+
+type LRUCache struct {
+	cap int
+	cache map[int] *list.Element
+	lst *list.List
+}
+
+func Constructor(capacity int) LRUCache {
+	return LRUCache{capacity, map[int]*list.Element{}, list.New()}
+}
+
+func (this *LRUCache) Get(key int) int {
+	e := this.cache[key]
+	if e == nil {
+		return -1
+	}
+	this.lst.MoveToFront(e)
+	return e.Value.(entry).value
+}
+
+func (this *LRUCache) Put(key int, value int)  {
+	if e := this.cache[key]; e != nil {
+		e.Value = entry{key, value}
+		this.lst.MoveToFront(e)
+		return
+	}
+	this.cache[key] = this.lst.PushFront(entry{key, value})
+	if len(this.cache) > this.cap {
+		delete(this.cache, this.lst.Remove(this.lst.Back()).(entry).key)
+	}
+}
+```
+
+
 
