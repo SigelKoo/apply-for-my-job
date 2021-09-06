@@ -446,3 +446,965 @@ nodeData中，每个跳表节点占用一段连续的存储空间，每一个字
 
 # sstable
 
+## 概述
+
+leveldb是典型的LSM树(Log Structured-Merge Tree)实现，即一次leveldb的写入过程并不是直接将数据持久化到磁盘文件中，而是将写操作首先写入日志文件中，其次将写操作应用在memtable上。
+
+当leveldb达到checkpoint点（memtable中的数据量超过了预设的阈值），会将当前memtable冻结成一个不可更改的内存数据库（immutable memory db），并且创建一个新的memtable供系统继续使用。
+
+immutable memory db会在后台进行一次minor compaction，即将内存数据库中的数据持久化到磁盘文件中。
+
+leveldb（或者说LSM树）设计Minor Compaction的目的是为了：
+
+1. 有效地降低内存的使用率；
+2. 避免日志文件过大，系统恢复时间过长；
+
+当memory db的数据被持久化到文件中时，leveldb将以一定规则进行文件组织，这种文件格式成为sstable。
+
+## SStable文件格式
+
+### 物理结构
+
+为了提高整体的读写效率，一个sstable文件按照固定大小进行块划分，默认每个块的大小为4KiB。每个Block中，除了存储数据以外，还会存储两个额外的辅助字段：
+
+1. 压缩类型
+2. CRC校验码
+
+压缩类型说明了Block中存储的数据是否进行了数据压缩，若是，采用了哪种算法进行压缩。leveldb中默认采用Snappy算法进行压缩。
+
+CRC校验码是循环冗余校验校验码，校验范围包括数据以及压缩类型。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/sstable_physic.jpeg)
+
+### 逻辑结构
+
+在逻辑上，根据功能不同，leveldb在逻辑上又将sstable分为：
+
+1. **data block**: 用来存储key value数据对；
+2. **filter block**: 用来存储一些过滤器相关的数据（布隆过滤器），但是若用户不指定leveldb使用过滤器，leveldb在该block中不会存储任何内容；
+3. **meta Index block**: 用来存储filter block的索引信息（索引信息指在该sstable文件中的偏移量以及数据长度）；
+4. **index block**：index block中用来存储每个data block的索引信息；
+5. **footer**: 用来存储meta index block及index block的索引信息；
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/sstable_logic.jpeg)
+
+注意，1-4类型的区块，其物理结构图所示，每个区块都会有自己的压缩信息以及CRC校验码信息。
+
+## data block结构
+
+data block中存储的数据是leveldb中的key value键值对。其中一个data block中的数据部分（不包括压缩类型、CRC校验码）按逻辑又以下图进行划分：
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/datablock.jpeg)
+
+第一部分用来存储key value数据。由于sstable中所有的key value对都是严格按序存储的，用了节省存储空间，leveldb并不会为每一对key value对都存储完整的key值，而是存储与**上一个key非共享的部分**，避免了key重复内容的存储。
+
+每间隔若干个key value对，将为该条记录重新存储一个完整的key。重复该过程（默认间隔值为16），每个重新存储完整key的点称之为Restart point。
+
+>leveldb设计Restart point的目的是在读取sstable内容时，加速查找的过程。
+>
+>由于每个Restart point存储的都是完整的key值，因此在sstable中进行数据查找时，可以首先利用restart point点的数据进行键值比较，以便于快速定位目标数据所在的区域；
+>
+>当确定目标数据所在区域时，再依次对区间内所有数据项逐项比较key值，进行细粒度地查找；
+>
+>该思想有点类似于跳表中利用高层数据迅速定位，底层数据详细查找的理念，降低查找的复杂度。
+
+每个数据项的格式如下图所示：
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/entry_format.jpeg)
+
+一个entry分为5部分内容：
+
+1. 与前一条记录key共享部分的长度；
+2. 与前一条记录key不共享部分的长度；
+3. value长度；
+4. 与前一条记录key非共享的内容；
+5. value内容；
+
+例如：
+
+```
+restart_interval=2
+entry one  : key=deck,value=v1
+entry two  : key=dock,value=v2
+entry three: key=duck,value=v3
+```
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/datablock_example_1.jpeg)
+
+三组entry按上图的格式进行存储。值得注意的是restart_interval为2，因此每隔两个entry都会有一条数据作为restart point点的数据项，存储完整key值。因此entry3存储了完整的key。
+
+此外，第一个restart point为0（偏移量），第二个restart point为16，restart point共有两个，因此一个datablock数据段的末尾添加了下图所示的数据：
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/datablock_example_2.jpeg)
+
+尾部数据记录了每一个restart point的值，以及所有restart point的个数。
+
+## filter block结构
+
+为了加快sstable中数据查询的效率，在直接查询datablock中的内容之前，leveldb首先根据filter block中的过滤数据判断指定的datablock中是否有需要查询的数据，若判断不存在，则无需对这个datablock进行数据查找。
+
+filter block存储的是data block数据的一些过滤信息。这些过滤数据一般指代布隆过滤器的数据，用于加快查询的速度，关于布隆过滤器的详细内容，可以见《Leveldb源码分析 - 布隆过滤器》。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/filterblock_format.jpeg)
+
+filter block存储的数据主要可以分为两部分：（1）过滤数据（2）索引数据。
+
+其中索引数据中，`filter i offset`表示第i个filter data在整个filter block中的起始偏移量，`filter offset's offset`表示filter block的索引数据在filter block中的偏移量。
+
+在读取filter block中的内容时，可以首先读出`filter offset's offset`的值，然后依次读取`filter i offset`，根据这些offset分别读出`filter data`。
+
+Base Lg默认值为11，表示每2KB的数据，创建一个新的过滤器来存放过滤数据。
+
+一个sstable只有一个filter block，其内存储了所有block的filter数据. 具体来说，filter_data_k 包含了所有起始位置处于 [base*k, base*(k+1)]范围内的block的key的集合的filter数据，按数据大小而非block切分主要是为了尽量均匀，以应对存在一些block的key很多，另一些block的key很少的情况。
+
+>leveldb中，特殊的sstable文件格式设计简化了许多操作，例如：
+>
+>索引和BloomFilter等元数据可随文件一起创建和销毁，即直接存在文件里，不用加载时动态计算，不用维护更新
+
+## meta index block结构
+
+meta index block用来存储filter block在整个sstable中的索引信息。
+
+meta index block只存储一条记录：
+
+该记录的key为："filter."与过滤器名字组成的常量字符串
+
+该记录的value为：filter block在sstable中的索引信息序列化后的内容，索引信息包括：
+
+（1）在sstable中的偏移量
+
+（2）数据长度
+
+## index block结构
+
+与meta index block类似，index block用来存储所有data block的相关索引信息。
+
+indexblock包含若干条记录，每一条记录代表一个data block的索引信息。
+
+一条索引包括以下内容：
+
+1. data block i 中最大的key值；
+2. 该data block起始地址在sstable中的偏移量；
+3. 该data block的大小；
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/indexblock_format.jpeg)
+
+>其中，data block i最大的key值还是index block中该条记录的key值。
+>
+>如此设计的目的是，依次比较index block中记录信息的key值即可实现快速定位目标数据在哪个data block中。
+
+## footer结构
+
+footer大小固定，为48字节，用来存储meta index block与index block在sstable中的索引信息，另外尾部还会存储一个magic word，内容为：`http://code.google.com/p/leveldb/`字符串sha1哈希的前8个字节。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/footer_format.jpeg)
+
+## 读写操作
+
+### 写操作
+
+sstable的写操作通常发生在：
+
+- memory db将内容持久化到磁盘文件中时，会创建一个sstable进行写入；
+- leveldb后台进行文件compaction时，会将若干个sstable文件的内容重新组织，输出到若干个新的sstable文件中；
+
+对sstable进行写操作的数据结构为tWriter，具体定义如下：
+
+```go
+// tWriter wraps the table writer. It keep track of file descriptor
+// and added key range.
+type tWriter struct {
+    t *tOps
+
+    fd storage.FileDesc // 文件描述符
+    w  storage.Writer   // 文件系统writer
+    tw *table.Writer
+
+    first, last []byte
+}
+```
+
+主要包括了一个sstable的文件描述符，底层文件系统的writer，该sstable中所有数据项最大最小的key值以及一个内嵌的tableWriter。
+
+一次sstable的写入为一次不断利用迭代器读取需要写入的数据，并不断调用tableWriter的`Append`函数，直至所有有效数据读取完毕，为该sstable文件附上元数据的过程。
+
+该迭代器可以是一个内存数据库的迭代器，写入情景对应着上述的第一种情况；
+
+该迭代器也可以是一个sstable文件的迭代器，写入情景对应着上述的第二种情况；
+
+> sstable的元数据包括：（1）文件编码（2）大小（3）最大key值（4）最小key值
+
+故，理解tableWriter的`Append`函数是理解整个写入过程的关键。
+
+**tableWriter**
+
+在介绍append函数之前，首先介绍一下tableWriter这个数据结构。主要的定义如下：
+
+```go
+// Writer is a table writer.
+type Writer struct {
+    writer io.Writer
+    // Options
+    blockSize   int // 默认是4KiB
+
+    dataBlock   blockWriter // data块Writer
+    indexBlock  blockWriter // indexBlock块Writer
+    filterBlock filterWriter // filter块Writer
+    pendingBH   blockHandle
+    offset      uint64
+    nEntries    int // key-value键值对个数
+}
+```
+
+其中blockWriter与filterWriter表示底层的两种不同的writer，blockWriter负责写入data数据的写入，而filterWriter负责写入过滤数据。
+
+pendingBH记录了上一个dataBlock的索引信息，当下一个dataBlock的数据开始写入时，将该索引信息写入indexBlock中。
+
+**Append**
+
+一次append函数的主要逻辑如下：
+
+1. 若本次写入为新dataBlock的第一次写入，则将上一个dataBlock的索引信息写入；
+2. 将key value数据写入datablock;
+3. 将过滤信息写入filterBlock；
+4. 若datablock中的数据超过预定上限，则标志着本次datablock写入结束，将内容刷新到磁盘文件中；
+
+```go
+func (w *Writer) Append(key, value []byte) error {
+    w.flushPendingBH(key)
+    // Append key/value pair to the data block.
+    w.dataBlock.append(key, value)
+    // Add key to the filter block.
+    w.filterBlock.add(key)
+
+    // Finish the data block if block size target reached.
+    if w.dataBlock.bytesLen() >= w.blockSize {
+        if err := w.finishBlock(); err != nil {
+            w.err = err
+            return w.err
+        }
+    }
+    w.nEntries++
+    return nil
+}
+```
+
+**dataBlock.append**
+
+该函数将编码后的kv数据写入到dataBlock对应的buffer中，编码的格式如上文中提到的数据项的格式。此外，在写入的过程中，若该数据项为restart点，则会添加相应的restart point信息。
+
+**filterBlock.append**
+
+该函数将kv数据项的key值加入到过滤信息中。
+
+**finishBlock**
+
+若一个datablock中的数据超过了固定上限，则需要将相关数据写入到磁盘文件中。
+
+在写入时，需要做以下工作：
+
+1. 封装dataBlock，记录restart point的个数；
+2. 若dataBlock的数据需要进行压缩（例如snappy压缩算法），则对dataBlock中的数据进行压缩；
+3. 计算checksum；
+4. 封装dataBlock索引信息（offset，length）；
+5. 将datablock的buffer中的数据写入磁盘文件；
+6. 利用这段时间里维护的过滤信息生成过滤数据，放入filterBlock对用的buffer中；
+
+**Close**
+
+当迭代器取出所有数据并完成写入后，调用tableWriter的Close函数完成最后的收尾工作：
+
+1. 若buffer中仍有未写入的数据，封装成一个datablock写入；
+2. 将filterBlock的内容写入磁盘文件；
+3. 将filterBlock的索引信息写入metaIndexBlock中，写入到磁盘文件；
+4. 写入indexBlock的数据；
+5. 写入footer数据；
+
+至此为止，所有的数据已经被写入到一个sstable中了，由于**一个sstable是作为一个memory db或者Compaction的结果原子性落地的**，因此在sstable写入完成之后，将进行更为复杂的**leveldb的版本更新**。
+
+## 读操作
+
+读操作作为写操作的逆过程，充分理解了写操作，将会帮助理解读操作。
+
+下图为在一个sstable中查找某个数据项的流程图：
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/sstable_read_procedure.jpeg)
+
+大致流程为：
+
+1. 首先判断“文件句柄”cache中是否有指定sstable文件的文件句柄，若存在，则直接使用cache中的句柄；否则打开该sstable文件，**按规则读取该文件的元数据**，将新打开的句柄存储至cache中；
+2. 利用sstable中的index block进行快速的数据项位置定位，得到该数据项有可能存在的**两个**data block；
+3. 利用index block中的索引信息，首先打开第一个可能的data block；
+4. 利用filter block中的过滤信息，判断指定的数据项是否存在于该data block中，若存在，则创建一个迭代器对data block中的数据进行迭代遍历，寻找数据项；若不存在，则结束该data block的查找；
+5. 若在第一个data block中找到了目标数据，则返回结果；若未查找成功，则打开第二个data block，重复步骤4；
+6. 若在第二个data block中找到了目标数据，则返回结果；若未查找成功，则返回`Not Found`错误信息；
+
+**缓存**
+
+在leveldb中，使用cache来缓存两类数据：
+
+- sstable文件句柄及其元数据；
+- data block中的数据；
+
+因此在打开文件之前，首先判断能够在cache中命中sstable的文件句柄，避免重复读取的开销。
+
+**元数据读取**
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/sstable_metadata.jpeg)
+
+由于sstable复杂的文件组织格式，因此在打开文件后，需要读取必要的元数据，才能访问sstable中的数据。
+
+元数据读取的过程可以分为以下几个步骤：
+
+1. 读取文件的最后48字节的利用，即**Footer**数据；
+2. 读取Footer数据中维护的(1) Meta Index Block(2) Index Block两个部分的索引信息并记录，以提高整体的查询效率；
+3. 利用meta index block的索引信息读取该部分的内容；
+4. 遍历meta index block，查看是否存在“有用”的filter block的索引信息，若有，则记录该索引信息；若没有，则表示当前sstable中不存在任何过滤信息来提高查询效率；
+
+**数据项的快速定位**
+
+sstable中存在多个data block，倘若依次进行“遍历”显然是不可取的。但是由于一个sstable中所有的数据项都是按序排列的，因此可以利用有序性已经index block中维护的索引信息快速定位目标数据项可能存在的data block。
+
+一个index block的文件结构示意图如下：
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/indexblock.jpeg)
+
+index block是由一系列的键值对组成，每一个键值对表示一个data block的索引信息。
+
+键值对的key为该data block中数据项key的最大值，value为该data block的索引信息（offset, length）。
+
+因此若需要查找目标数据项，仅仅需要依次比较index block中的这些索引信息，倘若目标数据项的key大于某个data block中最大的key值，则该data block中必然不存在目标数据项。故通过这个步骤的优化，可以直接确定目标数据项落在哪个data block的范围区间内。
+
+> 值得注意的是，与data block一样，index block中的索引信息同样也进行了key值截取，即第二个索引信息的key并不是存储完整的key，而是存储与前一个索引信息的key不共享的部分，区别在于data block中这种范围的划分粒度为16，而index block中为2 。
+>
+> 也就是说，index block连续两条索引信息会被作为一个最小的“比较单元“，在查找的过程中，若第一个索引信息的key小于目标数据项的key，则紧接着会比较第三条索引信息的key。
+>
+> 这就导致最终目标数据项的范围区间为某”两个“data block。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/index_block_find.jpeg)
+
+**过滤data block**
+
+若sstable存有每一个data block的过滤数据，则可以利用这些过滤数据对data block中的内容进行判断，“确定”目标数据是否存在于data block中。
+
+过滤的原理为：
+
+- 若过滤数据显示目标数据不存在于data block中，则目标数据**一定不**存在于data block中；
+- 若过滤数据显示目标数据存在于data block中，则目标数据**可能存在**于data block中；
+
+因此利用过滤数据可以过滤掉部分data block，避免发生无谓的查找。
+
+**查找data block**
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/datablock_format.jpeg)
+
+在data block中查找目标数据项是一个简单的迭代遍历过程。虽然data block中所有数据项都是按序排序的，但是作者并没有采用“二分查找”来提高查找的效率，而是使用了更大的查找单元进行快速定位。
+
+与index block的查找类似，data block中，以16条记录为一个查找单元，若entry 1的key小于目标数据项的key，则下一条比较的是entry 17。
+
+因此查找的过程中，利用更大的查找单元快速定位目标数据项可能存在于哪个区间内，之后依次比较判断其是否存在与data block中。
+
+可以看到，sstable很多文件格式设计（例如restart point， index block，filter block，max key）在查找的过程中，都极大地提升了整体的查找效率。
+
+## 文件特点
+
+### 只读性
+
+sstable文件为compaction的结果原子性的产生，在其余时间是只读的。
+
+### 完整性
+
+一个sstable文件，其辅助数据：
+
+- 索引数据
+- 过滤数据
+
+都直接存储于同一个文件中。当读取是需要使用这些辅助数据时，无须额外的磁盘读取；当sstable文件需要删除时，无须额外的数据删除。简要地说，辅助数据随着文件一起创建和销毁。
+
+### 并发访问友好性
+
+由于sstable文件具有只读性，因此不存在同一个文件的读写冲突。
+
+leveldb采用引用计数维护每个文件的引用情况，当一个文件的计数值大于0时，对此文件的删除动作会等到该文件被释放时才进行，因此实现了无锁情况下的并发访问。
+
+### Cache一致性
+
+sstable文件为只读的，因此cache中的数据永远于sstable文件中的数据保持一致。
+
+# 缓存系统
+
+缓存对于一个数据库读性能的影响十分巨大，倘若leveldb的每一次读取都会发生一次磁盘的IO，那么其整体效率将会非常低下。
+
+Leveldb中使用了一种基于LRUCache的缓存机制，用于缓存：
+
+- 已打开的sstable文件对象和相关元数据；
+- sstable中的dataBlock的内容；
+
+使得在发生读取热数据时，尽量在cache中命中，避免IO读取。
+
+## Cache结构
+
+leveldb中使用的cache是一种LRUcache，其结构由两部分内容组成：
+
+- Hash table：用来存储数据；
+- LRU：用来维护数据项的新旧信息；
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/cache_arch.jpeg)
+
+其中Hash table是基于Yujie Liu等人的论文《Dynamic-Sized Nonblocking Hash Table》实现的，用来存储数据。由于hash表一般需要保证插入、删除、查找等操作的时间复杂度为 O(1)。
+
+当hash表的数据量增大时，为了保证这些操作仍然保有较为理想的操作效率，需要对hash表进行resize，即改变hash表中bucket的个数，对所有的数据进行重散列。
+
+基于该文章实现的hash table可以实现resize的过程中**不阻塞其他并发的读写请求**。
+
+LRU中则根据Least Recently Used原则进行数据新旧信息的维护，当整个cache中存储的数据容量达到上限时，便会根据LRU算法自动删除最旧的数据，使得整个cache的存储容量保持一个常量。
+
+## Dynamic-sized NonBlocking Hash table
+
+在hash表进行resize的过程中，保持Lock-Free是一件非常困难的事。
+
+一个hash表通常由若干个bucket组成，每一个bucket中会存储若干条被散列至此的数据项。当hash表进行resize时，需要将“旧”桶中的数据读出，并且重新散列至另外一个“新”桶中。假设这个过程不是一个原子操作，那么会导致此刻其他的读、写请求的结果发生异常，甚至导致数据丢失的情况发生。
+
+因此，liu等人提出了一个新颖的概念：**一个bucket的数据是可以冻结的**。
+
+这个特点极大地简化了hash表在resize过程中在不同bucket之间转移数据的复杂度。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/cache_select.jpeg)
+
+该哈希表的散列与普通的哈希表一致，都是借助散列函数，将用户需要查找、更改的数据散列到某一个哈希桶中，并在哈希桶中进行操作。
+
+由于一个哈希桶的容量是有限的（一般不大于32个数据），因此在哈希桶中进行插入、查找的时间复杂度可以视为是常量的。
+
+### 扩大
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/cache_expend.jpeg)
+
+当cache中维护的数据量太大时，会发生哈希表扩张的情况。以下两种情况是为“cache中维护的数据量过大”：
+
+- 整个cache中，数据项（node）的个数超过预定的阈值（默认初始状态下哈希桶的个数为16个，每个桶中可存储32个数据项，即总量的阈值为哈希桶个数乘以每个桶的容量上限）；
+- 当cache中出现了数据不平衡的情况。当某些桶的数据量超过了32个数据，即被视作数据发生散列不平衡。当这种不平衡累积值超过预定的阈值（128）个时，就需要进行扩张；
+
+一次扩张的过程为：
+
+1. 计算新哈希表的哈希桶个数（扩大一倍）；
+2. 创建一个空的哈希表，并将旧的哈希表（主要为所有哈希桶构成的数组）转换一个“过渡期”的哈希表，表中的每个哈希桶都被“冻结”；
+3. 后台利用“过渡期”哈希表中的“被冻结”的哈希桶信息对新的哈希表进行内容构建；
+
+**值得注意的是，在完成新的哈希表构建的整个过程中，哈希表并不是拒绝服务的，所有的读写操作仍然可以进行**。
+
+**哈希表扩张过程中，最小的封锁粒度为哈希桶级别**。
+
+当有新的读写请求发生时，若被散列之后得到的哈希桶仍然未构建完成，则“主动”进行构建，并将构建后的哈希桶填入新的哈希表中。后台进程构建到该桶时，发现已经被构建了，则无需重复构建。
+
+因此如上图所示，哈希表扩张结束，哈希桶的个数增加了一倍，于此同时仍然可以对外提供读写服务，仅仅需要哈希桶级别的封锁粒度就可以保证所有操作的一致性跟原子性。
+
+**构建哈希桶**
+
+当哈希表扩张时，构建一个新的哈希桶其实就是将一个旧哈希桶中的数据拆分成两个新的哈希桶。
+
+拆分的规则很简单。由于一次散列的过程为：
+
+1. 利用散列函数对数据项的key值进行计算；
+2. 将第一步得到的结果取哈希桶个数的余，得到哈希桶的ID；
+
+因此拆分时仅需要将数据项key的散列值对新的哈希桶个数取余即可。
+
+### 缩小
+
+当哈希表中数据项的个数少于哈希桶的个数时，需要进行收缩。收缩时，哈希桶的个数变为原先的一半，2个旧哈希桶的内容被合并成一个新的哈希桶，过程与扩张类似，在这里不展开详述。
+
+## LRU
+
+除了利用哈希表来存储数据以外，leveldb还利用LRU来管理数据。
+
+Leveldb中，LRU利用一个双向循环链表来实现。每一个链表项称之为`LRUNode`。
+
+```go
+type lruNode struct {
+    n   *Node // customized node
+    h   *Handle
+    ban bool
+
+    next, prev *lruNode
+}
+```
+
+一个`LRUNode`除了维护一些链表中前后节点信息以外，还存储了一个哈希表中数据项的指针，通过该指针，当某个节点由于LRU策略被驱逐时，从哈希表中“安全的”删除数据内容。
+
+LRU提供了以下几个接口：
+
+- Promote
+
+若一个hash表中的节点是第一次被创建，则为该节点创建一个`LRUNode`，并将`LRUNode`至于链表的头部，表示为最新的数据；
+
+若一个hash表中的节点之前就有相关的`LRUNode`存在与链表中，将该`LRUNode`移至链表头部；
+
+若因为新增加一个LRU数据，导致超出了容量上限，就需要根据策略清除部分节点。
+
+- Ban
+
+将hash表节点对应的`LRUNode`从链表中删除，并“尝试”从哈希表中删除数据。
+
+由于该哈希表节点的数据可能被其他线程正在使用，因此需要查看该数据的引用计数，只有当引用计数为0时，才可以真正地从哈希表中进行删除。
+
+## 缓存数据
+
+leveldb利用上述的cache结构来缓存数据。其中：
+
+- cache：来缓存已经被打开的sstable文件句柄以及元数据（默认上限为500个）；
+- bcache：来缓存被读过的sstable中dataBlock的数据（默认上限为8MB）;
+
+当一个sstable文件需要被打开时，首先从cache中寻找是否已经存在相关的文件句柄，若存在则无需重复打开；若不存在，则从打开相关文件，并将（1）indexBlock数据，（2）metaIndexBlock数据等相关元数据进行预读。
+
+# 布隆过滤器
+
+Bloom Filter是一种空间效率很高的随机数据结构，它利用位数组很简洁地表示一个集合，并能判断一个元素是否属于这个集合。Bloom Filter的这种高效是有一定代价的：在判断一个元素是否属于某个集合时，有可能会把不属于这个集合的元素误认为属于这个集合（false positive）。因此，Bloom Filter不适合那些“零错误”的应用场合。而在能容忍低错误率的应用场合下，Bloom Filter通过极少的错误换取了存储空间的极大节省。
+
+leveldb中利用布隆过滤器判断指定的key值是否存在于sstable中，若过滤器表示不存在，则该key一定不存在，由此加快了查找的效率。
+
+## 结构
+
+bloom过滤器底层是一个位数组，初始时每一位都是0
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/bloom1.jpg)
+
+当插入值x后，分别利用k个哈希函数（图中为3）利用x的值进行散列，并将散列得到的值与bloom过滤器的容量进行取余，将取余结果所代表的那一位值置为1。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/bloom2.jpg)
+
+一次查找过程与一次插入过程类似，同样利用k个哈希函数对所需要查找的值进行散列，只有散列得到的每一个位的值均为1，才表示该值“**有可能**”真正存在；反之若有任意一位的值为0，则表示该值一定不存在。例如y1一定不存在；而y2可能存在。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/bloom3.jpg)
+
+## 数学结论
+
+http://blog.csdn.net/jiaomeng/article/details/1495500该文中从数学的角度阐述了布隆过滤器的原理，以及一系列的数学结论。
+
+首先，与布隆过滤器准确率有关的参数有：
+
+- 哈希函数的个数k；
+- 布隆过滤器位数组的容量m;
+- 布隆过滤器插入的数据数量n;
+
+主要的数学结论有：
+
+1. 为了获得最优的准确率，当k = ln2 * (m/n)时，布隆过滤器获得最优的准确性；
+2. 在哈希函数的个数取到最优时，要让错误率不超过є，m至少需要取到最小值的1.44倍；
+
+## 实现
+
+leveldb中的布隆过滤器实现较为简单，以goleveldb为例，有关的代码在filter/bloom.go中。
+
+定义如下，bloom过滤器只是一个int数字。
+
+```go
+type bloomFilter int
+```
+
+创建一个布隆过滤器时，只需要指定为每个key分配的位数即可，如结论2所示，只要该值（m/n）大于1.44即可，一般可以取10。
+
+```go
+func NewBloomFilter(bitsPerKey int) Filter {
+    return bloomFilter(bitsPerKey)
+}
+```
+
+创建一个generator, 这一步中需要指定哈希函数的个数k，可以看到k = f * ln2，而f = m/n，即数学结论1。
+
+返回的generator中可以添加新的key信息，调用generate函数时，将所有的key构建成一个位数组写在指定的位置。
+
+```go
+func (f bloomFilter) NewGenerator() FilterGenerator {
+    // Round down to reduce probing cost a little bit.
+    k := uint8(f * 69 / 100) // 0.69 =~ ln(2)
+    if k < 1 {
+        k = 1
+    } else if k > 30 {
+        k = 30
+    }
+    return &bloomFilterGenerator{
+        n: int(f),
+        k: k,
+    }
+}
+```
+
+generator主要有两个函数：
+
+1. Add
+2. Generate
+
+Add函数中，只是简单地将key的哈希散列值存储在一个整型数组中
+
+```go
+func (g *bloomFilterGenerator) Add(key []byte) {
+    // Use double-hashing to generate a sequence of hash values.
+    // See analysis in [Kirsch,Mitzenmacher 2006].
+    g.keyHashes = append(g.keyHashes, bloomHash(key))
+}
+```
+
+Generate函数中，将之前一段时间内所有添加的key信息用来构建一个位数组，该位数组中包含了所有key的存在信息。
+
+位数组的大小为用户指定的每个key所分配的位数 乘以 key的个数。
+
+位数组的最末尾用来存储k的大小。
+
+```go
+func (g *bloomFilterGenerator) Generate(b Buffer) {
+    // Compute bloom filter size (in both bits and bytes)
+    // len(g.keyHashes) 可以理解为n， g.n可以理解为m/n
+    // nBits可以理解为m
+    nBits := uint32(len(g.keyHashes) * g.n)
+    // For small n, we can see a very high false positive rate.  Fix it
+    // by enforcing a minimum bloom filter length.
+    if nBits < 64 {
+        nBits = 64
+    }
+    nBytes := (nBits + 7) / 8
+    nBits = nBytes * 8
+
+    dest := b.Alloc(int(nBytes) + 1)
+    dest[nBytes] = g.k
+
+    for _, kh := range g.keyHashes {
+        // Double Hashing
+        delta := (kh >> 17) | (kh << 15) // Rotate right 17 bits
+        for j := uint8(0); j < g.k; j++ {
+            bitpos := kh % nBits
+            dest[bitpos/8] |= (1 << (bitpos % 8))
+            kh += delta
+        }
+    }
+
+    g.keyHashes = g.keyHashes[:0]
+}
+```
+
+Contain函数用来判断指定的key是否存在。
+
+```go
+func (f bloomFilter) Contains(filter, key []byte) bool {
+    nBytes := len(filter) - 1
+    if nBytes < 1 {
+        return false
+    }
+    nBits := uint32(nBytes * 8)
+
+    // Use the encoded k so that we can read filters generated by
+    // bloom filters created using different parameters.
+    k := filter[nBytes]
+    if k > 30 {
+        // Reserved for potentially new encodings for short bloom filters.
+        // Consider it a match.
+        return true
+    }
+
+    kh := bloomHash(key)
+    delta := (kh >> 17) | (kh << 15) // Rotate right 17 bits
+    for j := uint8(0); j < k; j++ {
+        bitpos := kh % nBits
+        if (uint32(filter[bitpos/8]) & (1 << (bitpos % 8))) == 0 {
+            return false
+        }
+        kh += delta
+    }
+    return true
+}
+```
+
+# compaction
+
+Compaction是leveldb最为复杂的过程之一，同样也是leveldb的性能瓶颈之一。其本质是一种内部数据重合整合的机制，同样也是一种平衡读写速率的有效手段，因此在下文中，首先介绍下leveldb中设计compaction的原由，再来介绍下compaction的具体过程。
+
+## Compaction的作用
+
+### 数据持久化
+
+leveldb是典型的LSM树实现，因此需要对内存中的数据进行持久化。一次内存数据的持久化过程，在leveldb中称为**Minor Compaction**。
+
+一次minor compaction的产出是一个0层的sstable文件，其中包含了所有的内存数据。但是若干个0层文件中是可能存在数据overlap的。
+
+### 提高读写效率
+
+正如前面的文章提到，leveldb是一个写效率十分高的存储引擎，存储的过程非常简单，只需要一次顺序的文件写和一个时间复杂度为O(log n)的内存操作即可。
+
+相比来说，leveldb的读操作就复杂不少。首先一到两次读操作需要进行一个复杂度为O(log n)的查询操作。若没有在内存中命中数据，则需要在按照数据的新旧程度在0层文件中依次进行查找**遍历**。由于0层文件中可能存在overlap，因此在最差情况下，可能需要遍历所有的文件。
+
+假设leveldb中就是以这样的方式进行数据维护，那么随着运行时间的增长，0层的文件个数会越来越多，在最差的情况下，查询一个数据需要遍历**所有的数据文件**，这显然是不可接受的。因此leveldb设计了一个**Major Compaction**的过程，将0层中的文件合并为若干个没有数据重叠的1层文件。
+
+对于没有数据重叠的文件，一次查找过程就可以进行优化，最多只需要一个文件的遍历即可完成。因此，leveldb设计compaction的目的之一就是为了**提高读取的效率**。
+
+### 平衡读写差异
+
+有了minor compaction和major compaction，所有的数据在后台都会被规定的次序进行整合。但是一次major compaction的过程其本质是一个**多路归并**的过程，既有大量的磁盘读开销，也有大量的磁盘写开销，显然这是一个严重的性能瓶颈。
+
+但是当用户写入的速度始终大于major compaction的速度时，就会导致0层的文件数量还是不断上升，用户的读取效率持续下降。所以leveldb中规定：
+
+- 当0层文件数量超过`SlowdownTrigger`时，写入的速度主要减慢；
+- 当0层文件数量超过`PauseTrigger`时，写入暂停，直至Major Compaction完成；
+
+故compaction也可以起到平衡读写差异的作用。
+
+### 整理数据
+
+leveldb的每一条数据项都有一个版本信息，标识着这条数据的新旧程度。这也就意味着同样一个key，在leveldb中可能存在着多条数据项，且每个数据项包含了不同版本的内容。
+
+为了尽量减少数据集所占用的磁盘空间大小，leveldb在major compaction的过程中，对不同版本的数据项进行合并。
+
+## Compaction过程
+
+由上述所示，compaction分为两类：
+
+- minor compaction
+- major compaction
+
+这两类compaction负责在不同的场景下进行不同的数据整理。
+
+### Minor Compaction
+
+一次minor compaction非常简单，其本质就是将一个内存数据库中的所有数据持久化到一个磁盘文件中。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/minor_compaction.jpeg)
+
+每次minor compaction结束后，都会生成一个新的sstable文件，也意味着**Leveldb的版本状态发生了变化，会进行一个版本的更替**。有关版本控制的内容，将在接下去一篇文章中详细展开。
+
+值得注意的是，minor compaction是一个时效性要求非常高的过程，要求其在尽可能短的时间内完成，否则就会堵塞正常的写入操作，因此**minor compaction的优先级高于major compaction**。当进行minor compaction的时候有major compaction正在进行，则会首先暂停major compaction。
+
+### Major Compaction
+
+相比于minor compaction，major compaction就会复杂地多。首先看一下一次major compaction的示意图。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/major_compaction.jpeg)
+
+0层中浅蓝色的三个sstable文件，加上1层中的绿色的sstable文件，四个文件进行了合并，输出成两个按序组织的新的1层sstable文件进行替换。
+
+**条件**
+
+那么什么时候，会触发leveldb进行major compaction呢。总结地来说为以下三个条件：
+
+- 当0层文件数超过预定的上限（默认为4个）；
+- 当level i层文件的总大小超过(10 ^ i) MB；
+- 当某个文件无效读取的次数过多；
+
+**0层文件个数规定**
+
+由于compaction的其中一个目的是为了提高读取的效率，因此leveldb不允许0层存在过多的文件数，一旦超过了上限值，即可进行major compaction。
+
+**非0层文件数据大小限制**
+
+对于level i（i >= 1）的情况来说，一个读取最多只会访问一个sstable文件，因此，本身对于读取效率的影响不会太大。针对于这部分数据发生compaction的条件，从**提升读取效率**转变成了**降低compaction的IO开销**。
+
+假设leveldb的合并策略只有第一条，那么会导致1层文件的个数越来越多或者总的数据量越来越大，而通常一次合并中，**0层文件key的取值范围是很大的**，**导致每一次0层文件与1层文件进行合并时，1层文件输入文件的总数据量非常庞大**。所以不仅需要控制0层文件的个数，同样，每一层文件的总大小同样需要进行控制，使得每次进行compaction时，IO开销尽量保持常量。
+
+故leveldb规定，1层文件总大小上限为10MB，2层为100MB，依次类推，最高层（7层）没有限制。
+
+**文件读取次数过多**
+
+以上两个机制能够保证随着合并的进行，数据是严格下沉的，但是仍然存在一个问题。
+
+- 假设0层文件完成合并之后，1层文件同时达到了数据上限，同时需要进行合并。
+
+- 更加糟糕的是，在最差的情况下，0-n层的文件同时达到了合并的条件，每一层都需要进行合并。
+
+其中一种优化机制是：
+
+- source层的文件个数只有一个；
+- source层文件与source+1层文件没有重叠；
+- source层文件与source+2层的文件重叠部分不超过10个文件；
+
+当满足这几个条件时，可以将souce层的该文件直接移至source+1层。
+
+但是该条件非常苛刻，还是无法解决上述问题。为了避免可能存在这种“巨大”的合并开销，leveldb引入了第三个机制：”错峰合并“。
+
+那么（1）如何找寻这种适合错峰合并的文件（2）以及如果判断哪个时机是适合进行错峰合并的呢？
+
+对于问题（1）Leveldb的作者认为，一个文件一次查询的开销为10ms, **若某个文件的查询次数过多，且查询在该文件中不命中**, 那么这种行为就可以视为无效的查询开销，这种文件就可以进行错峰合并。
+
+对于问题（2），对于一个1MB的文件，对其合并的开销为25ms。因此当一个文件1MB的文件无效查询超过25次时，便可以对其进行合并。
+
+- 对于一个1MB的文件，其合并开销为（1）source层1MB的文件读取，（2）source+1层 10-12MB的文件读取（3）source+1层10-12MB的文件写入。
+
+- 总结25MB的文件IO开销，除以100MB／s的文件IO速度，估计开销为25ms。
+
+**采样探测**
+
+在每个sstable文件的元数据中，还有一个额外的字段`seekLeft`，默认为文件的大小除以16KB。
+
+leveldb在正常的数据访问时，会顺带进行采样探测。正常的数据访问包括（1）用户直接调用Get接口（2）用户使用迭代器进行访问。
+
+采样的规则：
+
+记录本次访问的第一个sstable文件。若在该文件中访问命中，则不做任何处理；若在该文件中访问不命中，则对 该文件的`seekLeft`标志做减一操作。
+
+知道某一个文件的`seekLeft`标志减少到0时，触发对该文件的错峰合并。
+
+故以上三种机制可以保障每次进行compaction的时候，总体开销不会呈现上升趋势。
+
+### 过程
+
+整个compaction可以简单地分为以下几步：
+
+1. 寻找合适的输入文件；
+2. 根据key重叠情况扩大输入文件集合；
+3. 多路合并；
+4. 积分计算；
+
+**寻找输入文件**：
+
+不同情况下发起的合并动作，其初始的输入文件不同。
+
+对于*level 0层文件数过多引发的合并场景或由于level i层文件总量过大的合并场景*，采用轮转的方法选择起始输入文件，记录了上一次该层合并的文件的最大key，下一次则选择在此key之后的首个文件。
+
+对于*错峰合并*，起始输入文件则为该查询次数过多的文件。
+
+**扩大输入文件集合**
+
+该过程如下：
+
+1. 红星标注的为起始输入文件；
+2. 在level i层中，查找与起始输入文件有key重叠的文件，如图中红线所标注，最终构成level i层的输入文件；
+3. 利用level i层的输入文件，在level i+1层找寻有key重叠的文件，结果为绿线标注的文件，构成level i，i+1层的输入文件；
+4. 最后利用两层的输入文件，在不扩大level i+1输入文件的前提下，查找level i层的有key重叠的文件，结果为蓝线标准的文件，构成最终的输入文件；
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/compaction_expand.jpeg)
+
+**多路合并**：
+
+多路合并的过程比较简单，即将level i层的文件，与level i+1层的文件中的数据项，按序整理之后，输出到level i+1层的若干个新文件中，即合并完成。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/table_merge.jpeg)
+
+注意在整理的过程中，需要将冗余的数据进行清理，即同一条数据的多个版本信息，只保留最新的那一份。
+
+但是要注意，某些仍然在使用的旧版本的数据，在此时不能立刻删除，而得等到用户使用结束，释放句柄后，根据引用计数来进行清除。
+
+**积分计算**
+
+每一次compaction都会消除若干source层的旧文件，新增source+1层的新文件，因此触发进行合并的条件状态可能也发生了变化。故在leveldb中，使用了计分牌来维护每一层文件的文件个数及数据总量信息，来**挑选出下一个需要进行合并的层数**。
+
+计分的规则很简单：
+
+- 对于0层文件，该层的分数为文件总数／4；
+- 对于非0层文件，该层的分数为文件数据总量／数据总量上限；
+
+将得分最高的层数记录，若该得分超过1，则为下一次进行合并的层数；
+
+## 用户行为
+
+由于leveldb内部进行compaction时有trivial move优化，且根据内部的文件格式组织，用户在使用leveldb时，可以尽量将大批量需要写入的数据进行预排序，利用空间局部性，尽量减少多路合并的IO开销。
+
+# 版本控制
+
+Leveldb每次新生成sstable文件，或者删除sstable文件，都会从一个版本升级成另外一个版本。
+
+换句话说，每次sstable文件的更替对于leveldb来说是一个最小的操作单元，具有原子性。
+
+版本控制对于leveldb来说至关重要，是保障数据正确性的重要机制。在本文中，将着重从版本数据的格式以及版本升级的过程进行展开。
+
+## Manifest
+
+manifest文件专用于记录版本信息。leveldb采用了增量式的存储方式，记录每一个版本相较于上一个版本的变化情况。
+
+展开来说，一个Manifest文件中，包含了多条Session Record。一个Session Record记录了从上一个版本至该版本的变化情况。
+
+>变化情况大致包括：
+>
+>（1）新增了哪些sstable文件；
+>
+>（2）删除了哪些sstable文件（由于compaction导致）；
+>
+>（3）最新的journal日志文件标号等；
+
+借助这个Manifest文件，leveldb启动时，可以根据一个初始的版本状态，不断地应用这些版本改动，使得系统的版本信息恢复到最近一次使用的状态。
+
+一个Manifest文件的格式示意图如下所示：
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/manifest_detail.jpeg)
+
+一个Manifest内部包含若干条Session Record，**其中第一条Session Record**记载了当时leveldb的**全量版本信息**，其余若干条Session Record仅记录每次更迭的变化情况。
+
+因此，每个manifest文件的第一条Session Record都是一个记录点，记载了全量的版本信息，可以作为一个初始的状态进行版本恢复。
+
+一个Session Record可能包含以下字段：
+
+- Comparer的名称；
+- 最新的journal文件编号；
+- 下一个可以使用的文件编号；
+- 数据库已经持久化数据项中最大的sequence number；
+- 新增的文件信息；
+- 删除的文件信息；
+- compaction记录信息；
+
+## Commit
+
+每当（1）完成一次major compaction整理内部数据或者（2）通过minor compaction或者重启阶段的日志重放新生成一个0层文件，都会触发leveldb进行一个版本升级。
+
+一次版本升级的过程如下：
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/version_update.jpeg)
+
+1. 新建一个session record，记录状态变更信息；
+2. 若本次版本更新的原因是由于minor compaction或者日志replay导致新生成了一个sstable文件，则在session record中记录新增的文件信息、最新的journal编号、数据库sequence number以及下一个可用的文件编号；
+3. 若本次版本更新的原因是由于major compaction，则在session record中记录新增、删除的文件信息、下一个可用的文件编号即可；
+4. 利用当前的版本信息，加上session record的信息，创建一个全新的版本信息。相较于旧的版本信息，新的版本信息更改的内容为：（1）每一层的文件信息；（2）每一层的计分信息；
+5. 将session record持久化；
+6. 若这是数据库启动后的第一条session record，则新建一个manifest文件，并将完整的版本信息全部记录进session record作为该manifest的基础状态写入，同时更改current文件，将其**指向**新建的manifest；
+7. 若数据库中已经创建了manifest文件，则将该条session record进行序列化后直接作为一条记录写入即可；
+8. 将当前的version设置为刚创建的version；
+
+>注意，对于leveldb来说，增减某些sstable文件需要作为一个原子性操作，状态变更前后需要保持数据库的一致性。
+>
+>在整个过程中，原子性体现在：整个操作的完成标志为manifest文件中完整的写入了一条session record，在此之前，即便某些文件写入失败导致进程退出，数据库重启启动时，仍然能够恢复到崩溃之前正确的状态，而将这些无用的sstable文件删除，重新进行compaction动作。
+>
+>一致性体现在：leveldb状态变更的操作都是以version更新为标记，而version更新是整个流程的最后一步，因此数据库必然都是从一个一致性的状态变更到另外一个一致性的状态。
+
+## Recover
+
+数据库每次启动时，都会有一个recover的过程，简要地来说，就是利用Manifest信息重新构建一个最新的version。
+
+![img](https://leveldb-handbook.readthedocs.io/zh/latest/_images/version_recover.jpeg)
+
+1. 利用Current文件读取最近使用的manifest文件；
+2. 创建一个空的version，并利用manifest文件中的session record依次作apply操作，还原出一个最新的version，注意manifest的第一条session record是一个version的快照，后续的session record记录的都是增量的变化；
+3. 将非current文件指向的其他**过期**的manifest文件删除；
+4. 将新建的version作为当前数据库的version；
+
+> 注意，随着leveldb运行时间的增长，一个manifest中包含的session record会越来越多，故leveldb在每次启动时都会重新创建一个manifest文件，并将第一条session record中记录当前version的快照状态。
+>
+> 其他过期的manifest文件会在下次启动的recover流程中进行删除。
+>
+> leveldb通过这种方式，来控制manifest文件的大小，但是数据库本身没有重启，manifest还是会一直增长。
+
+## Current
+
+由于每次启动，都会新建一个Manifest文件，因此leveldb当中可能会存在多个manifest文件。因此需要一个额外的current文件来指示当前系统使用的到底是哪个manifest文件。
+
+该文件中只有一个内容，即当前使用的manifest文件的文件名。
+
+## 异常处理
+
+倘若数据库中的manifest文件丢失，leveldb是否能够进行修复呢？
+
+答案是肯定的。
+
+当leveldb的manifest文件丢失时，所有版本信息也就丢失了，但是本身的数据文件还在。因此leveldb提供了`Recover`接口供用户进行版本信息恢复，具体恢复的过程如下：
+
+1. 按照文件编号的顺序扫描所有的sstable文件，获取每个文件的元数据（最大最小key），以及最终数据库的元数据（sequence number等）；
+2. 将所有sstable文件视为0层文件（由于0层文件允许出现key重叠的情况，因此不影响正确性）；
+3. 创建一个新的manifest文件，将扫描得到的数据库元数据进行记录；
+
+但是该方法的效率十分低下，首先需要对整个数据库的文件进行扫描，其次0层的文件必然将远远大于4个，这将导致极多的compaction发生。
+
+## 多版本并发控制
+
+leveldb中采用了MVCC来避免读写冲突。
+
+试想一下，当某个迭代器正在迭代某个sstable文件的内容，而后台的major compaction进程完成了合并动作，试图删除该sstable文件。那么假设没有任何控制并发的机制，就会导致迭代器读到的内容发生了丢失。
+
+最简单的处理方式就是加锁，当发生读的时候，后台所有的写操作都进行阻塞，但是这就机制就会导致leveldb的效率极低。故leveldb采用了多版本并发控制的方法来解决读写冲突。具体体现在：
+
+1. sstable文件是只读的，每次compaction都只是对若干个sstable文件进行多路合并后创建新的文件，故不会影响在某个sstable文件读操作的正确性；
+2. sstable都是具有版本信息的，即每次compaction完成后，都会生成新版本的sstable，因此可以保障读写操作都可以针对于相应的版本文件进行，解决了读写冲突；
+3. compaction生成的文件只有等合并完成后才会写入数据库元数据，在此期间对读操作来说是透明的，不会污染正常的读操作；
+4. 采用引用计数来控制删除行为。当compaction完成后试图去删除某个sstable文件，会根据该文件的引用计数作适当的删除延迟，即引用计数不为0时，需要等待至该文件的计数为0才真正进行删除；
