@@ -1,6 +1,6 @@
 # go中new和make区别
 
-new创建非map，slice，chan对象；返回值时指针；new只是分配内存，创建的对象是0值；struct类型使用new时底层调用runtime.newobject
+new创建非map，slice，chan对象；返回值时指针；new只是分配内存，创建的对象是零值；struct类型使用new时底层调用runtime.newobject
 
 ```go
 type st struct {

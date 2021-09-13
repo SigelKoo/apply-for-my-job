@@ -73,6 +73,28 @@ Goroutine特点：
 - 占用内存更小（几kb）
 - 调度更灵活(runtime调度)
 
+### 被废弃的goroutine调度器
+
+ 好了，既然我们知道了协程和线程的关系，那么最关键的一点就是调度协程的调度器的实现了。
+
+Go目前使用的调度器是2012年重新设计的，因为之前的调度器性能存在问题，所以使用4年就被废弃了，那么我们先来分析一下被废弃的调度器是如何运作的？
+
+> 大部分文章都是会用G来表示Goroutine，用M来表示线程，那么我们也会用这种表达的对应关系。
+
+[![img](https://github.com/aceld/golang/raw/main/images/13-gm.png)](https://github.com/aceld/golang/blob/main/images/13-gm.png)
+
+ 下面我们来看看被废弃的golang调度器是如何实现的？
+
+[![img](https://github.com/aceld/golang/raw/main/images/14-old%E8%B0%83%E5%BA%A6%E5%99%A8.png)](https://github.com/aceld/golang/blob/main/images/14-old调度器.png)
+
+ M想要执行、放回G都必须访问全局G队列，并且M有多个，即多线程访问同一资源需要加锁进行保证互斥/同步，所以全局G队列是有互斥锁进行保护的。
+
+老调度器有几个缺点：
+
+1. 创建、销毁、调度G都需要每个M获取锁，这就形成了**激烈的锁竞争**。
+2. M转移G会造成**延迟和额外的系统负载**。比如当G中包含创建新协程的时候，M创建了G’，为了继续执行G，需要把G’交给M’执行，也造成了**很差的局部性**，因为G’和G是相关的，最好放在M上执行，而不是其他M'。
+3. 系统调用(CPU在M之间的切换)导致频繁的线程阻塞和取消阻塞操作增加了系统开销。
+
 ### goroutine调度器的GMP模型的设计思想
 
 #### GMP
