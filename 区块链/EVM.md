@@ -2,14 +2,14 @@
 
 EVM用来执行以太坊上的交易
 
-![业务流程](https://img.learnblockchain.cn/2019/15548145070948.jpg)
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20181106141126929.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L1R1cmtleUNvY2s=,size_16,color_FFFFFF,t_70)
 
 输入一笔交易，内部会转换成一个Message对象，传入EVM执行。
 
-- 一笔普通转账交易，直接修改`StateDB`中对应的账户余额
-- 智能合约的创建或者调用通过EVM中的解释器加载和执行字节码，执行过程中可能会查询或者修改`StateDB`
+- 一笔普通转账交易，直接修改StateDB中对应的账户余额
+- 智能合约的创建或者调用通过EVM中的解释器加载和执行字节码，执行过程中可能会查询或者修改StateDB
 
-#### Intrinsic Gas 固定Gas
+### Intrinsic Gas 固定Gas
 
 每笔交易过来，不管三七二十一先需要收取一笔固定油费，计算方法如下：
 
@@ -19,15 +19,15 @@ EVM用来执行以太坊上的交易
 
 如果你的交易携带额外数据，那么这部分数据也是需要收费的，具体来说是按字节收费：字节为0的收4Gas，字节不为0收68Gas，所以你会看到很多做合约优化的，目的就是减少数据中不为0的字节数量，从而降低油费Gas消耗。
 
-#### 生成Contract对象
+### 生成Contract对象
 
-交易会被转换成一个Message对象传入EVM，而EVM则会根据Message生成一个Contract对象以便后续执行：
+Transaction对象会被转换成一个Message对象传入EVM，而EVM则会根据Message生成一个Contract对象以便后续执行：
 
 ![交易生成对象](https://img.learnblockchain.cn/2019/15548149590538.jpg)
 
-可以看到，**Contract中会根据合约地址，从`StateDB`中加载对应的代码，后面就可以送入解释器执行了**。
+可以看到，**Contract中会根据合约地址，从StateDB中加载对应的代码，后面就可以送入解释器执行了**。
 
-另外，执行合约能够消耗的油费有一个上限，就是节点配置的每个区块能够容纳的`GasLimit`。
+另外，执行合约能够消耗的油费有一个上限，就是节点配置的每个区块能够容纳的GasLimit。
 
 #### 送入解释器执行
 
@@ -46,7 +46,7 @@ EVM的每条指令称为一个OpCode（https://ethervm.io/），占用一个字�
 
 ![OpCode指令](https://img.learnblockchain.cn/2019/15548153378078.jpg)
 
-首先程序计数器会从合约代码中读取一个OpCode，然后从一个JumpTable中检索出对应的operation，也就是与其相关联的函数集合。接下来会计算该操作需要消耗的油费，如果油费耗光则执行失败，返回ErrOutOfGas错误。如果油费充足，则调用execute()执行该指令，根据指令类型的不同，会分别对Stack、Memory或者StateDB进行读写操作。
+首先PC会从合约代码中读取一个OpCode，然后从一个JumpTable中检索出对应的operation，也就是与其相关联的函数集合。接下来会计算该操作需要消耗的油费，如果油费耗光则执行失败，返回ErrOutOfGas错误。如果油费充足，则调用execute()执行该指令，根据指令类型的不同，会分别对Stack、Memory或者StateDB进行读写操作。
 
 JumpTable，是一个 [256] operation 的数据结构。每个下标对应了一种指令，使用operation来存储了指令对应的处理逻辑，gas消耗，堆栈验证方法，memory使用的大小等功能。
 
@@ -157,3 +157,113 @@ CALLCODE和DELEGATECALL的区别在于：`msg.sender`不同。
 下一步就是根据合约地址创建对应的`stateObject`，然后存储交易中包含的合约代码。该合约的所有状态变化会存储在一个`storage trie`中，最终以`Key-Value`的形式存储到StateDB中。代码一经存储则无法改变，而`storage trie`中的内容则是可以通过调用合约进行修改的，比如通过SSTORE指令。
 
 ![生成合约地址](https://img.learnblockchain.cn/2019/15548162475872.jpg)
+
+### 操作
+
+算术操作
+
+```
+ADD                     //对栈顶的两个条目进行加法
+MUL                     //对栈顶的两个条目进行乘法
+SUB                     //对栈顶的两个条目进行减法
+DIV                     //整数除法
+SDIV                    //带符号的整数除法
+MOD                     //模运算
+SMOD                    //带符号的模运算
+ADDMOD                  //先做加法然后进行模运算
+MULMOD                  //先做乘法然后进行模运算
+EXP                     //乘方运算
+SIGNEXTEND              //符号扩展操作
+SHA3                    //对内存中的一段数据进行Keccak-256哈希运算
+```
+
+注意，所有算术运算都对2256取了模（除非明确标注为不做此处理），并且0的0次方，即00，会被计算为1。
+
+栈操作
+
+```
+POP                  //移除栈顶的一个条目
+MLOAD                //从内存中加载一个“字”
+MSTORE               //向内存中保存一个“字”
+MSTORE8              //向内存中保存一个字节
+SLOAD                //从存储中加载一个“字”
+SSTORE               //向存储中保存一个“字”
+MSIZE                //获得当前已分配内存的字节数大小
+PUSHx                //将x字节的一个条目放到栈顶，其中x的数值可以是1到32（一个整“字”）的整数
+DUPx                 //复制栈顶的第x个条目到栈顶，其中x的数值可以是1到16的整数
+SWAPx                //交换栈顶条目和第x+1个栈内条目，其中x的数值可以是1到16的整数
+```
+
+处理流程操作
+
+```
+STOP                 //停止执行
+JUMP                 //将程序计数器设置为任意数值
+JUMPI                //基于条件修改程序计数器的值
+PC                   //取得程序计数器的数值（增加这个指令本身的计数之前的数值）
+JUMPDEST             //标记一个有效的跳转地址
+```
+
+系统操作
+
+```
+LOGx                  //增加一条带有x个主题的日志数据，其中x的数值可以是0到4的整数
+CREATE                //用关联代码创建一个新账户
+CALL                  //向另一个账户发起消息调用，也就是运行另一个账户的代码
+CALLCODE              //用另一个账户的代码向当前账户发起消息调用
+RETURN                //停止执行并返回输出数据
+DELEGATECALL          //用其他账户的代码向当前账户发起消息调用，但sender和value的数值保持不变
+STATICCALL            //向一个账户发起静态消息调用
+REVERT                //停止执行并撤销状态修改，但保持返回数据和剩余gas
+INVALID               //预设的无效指令
+SELFDESTRUCT          //停止执行，并将当前账户标记为自毁账户
+```
+
+逻辑操作
+
+```
+LT                         //小于比较操作
+GT                         //大于比较操作
+SLT                        //有符号小于比较操作
+SGT                        //有符号大于比较操作
+EQ                         //等于比较操作
+ISZERO                     //简单的非操作
+AND                        //按位与操作
+OR                         //按位或操作
+XOR                        //按位异或操作
+NOT                        //按位非操作
+BYTE                       //从一个“字”中取得一个字节数据
+```
+
+环境操作
+
+```
+GAS                    //取得可用gas的数量（减去这个指令的消耗）
+ADDRESS                //取得当前账户的地址
+BALANCE                //取得指定账户的余额
+ORIGIN                 //取得触发这次EVM执行的EOA地址
+CALLER                 //取得当前执行的调用者地址
+CALLVALUE              //取得当前执行的调用者所发送的以太币数量
+CALLDATALOAD           //取得当前执行的输入数据
+CALLDATASIZE           //取得当前输入数据的字节大小
+CALLDATACOPY           //将当前输入数据复制到内存中
+CODESIZE               //当前环境运行的代码的字节大小
+CODECOPY               //将当前环境运行的代码复制到内存中
+GASPRICE               //取得由初始交易所制定的gas价格
+EXTCODESIZE            //取得任意账户代码的字节大小
+EXTCODECOPY            //将任意账户的代码复制到内存中
+RETURNDATASIZE         //取得在当前环境中的前一次调用的输出数据字节大小
+RETURNDATACOPY         //将前一次调用的输出数据复制到内存中
+```
+
+区块操作
+
+```
+BLOCKHASH               //取得最新的256个完整区块中某个区块的哈希
+COINBASE                //取得当前区块的区块奖励受益人地址
+TIMESTAMP               //取得当前区块的时间戳
+NUMBER                  //取得当前区块的区块号
+DIFFICULTY              //取得当前区块的难度
+GASLIMIT                //取得当前区块的gas上限
+```
+
