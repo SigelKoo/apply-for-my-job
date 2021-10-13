@@ -182,6 +182,10 @@ Profiles:
                 <<: *ApplicationCapabilities
 ```
 
+在最初创建通道的时候，需要指定配置信息，这里面就有权限定义等内容。配置交易会生成一个配置区块，配置区块是中除了配置交易不存在其他交易，第一个配置区块就是创世区块。
+
+
+
 orderer.yaml与core.yaml分别是Orderer节点环境变量配置与Peer节点环境变量配置
 
 ```yaml
