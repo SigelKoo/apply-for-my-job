@@ -267,3 +267,250 @@ DIFFICULTY              //取得当前区块的难度
 GASLIMIT                //取得当前区块的gas上限
 ```
 
+# 源码
+
+```
+type BlockContext struct {
+	账户是否包含足够的用来转账的以太
+	将以太从一个帐户转移到另一个帐户
+
+	区块相关信息
+}
+
+EVM是以太坊虚拟机基础对象，并提供必要的工具，以使用提供的上下文运行给定状态的合约。
+应该指出的是，任何调用产生的任何错误都应该被认为是一种回滚修改状态和消耗所有GAS操作，不应该执行对具体错误的检查。 解释器确保生成的任何错误都被认为是错误的代码。
+
+type EVM struct {
+	Context BlockContext
+	为EVM提供StateDB相关操作
+	当前调用的栈
+
+	链配置信息
+	链规则
+	虚拟机配置
+	解释器
+	用于中止EVM调用操作
+	当前call可用的gas
+}
+
+func NewEVM(ctx Context, statedb StateDB, chainConfig *params.ChainConfig, vmConfig Config) *EVM {}
+```
+
+```
+数据库中的以太坊智能合约，包括合约代码和调用参数
+type Contract struct {
+	合约调用者
+	JUMPDEST分析的结果
+
+	合约代码
+	合约地址
+}
+func NewContract(caller ContractRef, object ContractRef, value *big.Int, gas uint64) *Contract {}
+```
+
+**创建EVM对象的代码：**
+
+```
+1. 组装BlockContext
+2. 创建EVM对象
+func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig *params.ChainConfig, config Config) *EVM {}
+3. 创建解释器
+func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {}
+```
+
+**创建合约**
+
+```go
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *big.Int, address common.Address) ([]byte, common.Address, uint64, error) {
+	执行深度检查，如果超出设定的深度限制  创建失败
+	账户余额不足，创建失败
+	确保指定地址没有已存在的相同合约
+	创建合约地址
+	创建数据库快照，为了迅速回滚
+	在当前状态新建合约账户
+	转账操作
+	创建合约
+	设置合约代码
+	执行合约的初始化
+	检查初始化生成的代码长度是否超过限制
+    合约创建成功
+    计算存储代码所需要的Gas，当前拥有的Gas足不足以存储代码
+    合约创建失败，借助上面创建的快照快速回滚
+}
+```
+
+**调用合约**
+
+```go
+func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *big.Int) (ret []byte, leftOverGas uint64, err error) {
+}
+```
+
+Call方法和create方法的逻辑大体相同，这里分析下他们的不同之处:
+
+- 1.call调用的是一个已经存在合约账户的合约，create是新建一个合约账户。
+- 2.call里evm.Transfer发生在合约的发送方和接收方，create里则是创建合约用户的账户和该合约用户之间。
+
+CallCode，它与Call不同的地方在于它使用调用者的EVMContext来执行给定地址的合约代码。
+
+DelegateCall，它与CallCode不同的地方在于它调用者被设置为调用者的调用者。
+
+StaticCall，它不允许执行任何状态的修改。
+
+
+
+**解释器**
+
+```go
+解释器配置
+type Config struct {
+	启用调试
+	操作码记录器
+	禁用解释器调用，代码库调用，委托调用
+	操作码opcode对应的操作表
+}
+用来运行智能合约的字节码
+type EVMInterpreter struct {
+	evm *EVM
+	解释器配置
+	最后一个call调用的返回值
+}
+```
+
+**实现智能合约的执行**
+
+```go
+执行合约代码
+func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
+	调用深度递增，evm执行栈的深度不能超过1024
+	重置上一个call的返回数据
+	合约代码为空
+	执行停止时将栈回收为int值缓存池
+    解释器主循环，循环运行直到执行显式STOP，RETURN或SELFDESTRUCT，发生错误 {
+    	捕获预执行的值进行跟踪
+    	从合约的二进制数据i获取第pc个opcode操作符 opcode是以太坊虚拟机指令，一共不超过256个，正好一个byte大小能装下
+    	从JumpTable表中查询op对应的操作
+    	计算新的内存大小以适应操作，必要时进行扩容
+    	计算执行操作所需要的gas
+    	执行操作
+    	验证int值缓存池
+    	将最后一次返回设为操作结果
+    }
+}
+```
+
+**JumpTable(opCode-operation)**
+
+在执行合约的时候涉及到contract.GetOp(pc)方法从合约二进制代码中取出第pc个操作符opcode，然后再按对应关系找到opcode对应的操作operation。这里的对应关系就保存在jump_table中。
+
+这里先要理解操作符opcode的概念，它是EVM的操作符。通俗地讲，一个opcode就是一个byte，solidity合约编译形成的bytecode中，一个byte就代表一个opcode。opcodes.go中定义了所有的操作符，并将所有的操作符按功能分类。
+
+每一个opcode都会对应一个具体的操作operation，一个操作包含其操作函数以及一些必要的参数。
+
+```go
+type operation struct {
+	execute     executionFunc // 操作函数
+	constantGas uint64
+	dynamicGas  gasFunc // 操作需要多少gas
+	minStack int // 需要最小栈
+	maxStack int // 不可超过的栈数量
+	memorySize memorySizeFunc // 操作需要的内存大小
+
+	halts   bool // 操作终止
+	jumps   bool // 操作跳转
+	writes  bool // 是否写入
+	reverts bool // 出错回滚
+	returns bool // 操作返回
+}
+```
+
+不同操作对应了不同的operation结构体
+
+**Stack栈**
+
+EVM是基于栈的虚拟机，这里栈的作用是用来保存操作数的。
+
+```go
+type Stack struct {
+	data []uint256.Int
+}
+
+func newstack() *Stack {
+	return stackPool.Get().(*Stack)
+}
+
+func (st *Stack) push(d *uint256.Int) {
+	// NOTE push limit (1024) is checked in baseCheck
+	st.data = append(st.data, *d)
+}
+
+func (st *Stack) pop() (ret uint256.Int) {
+	ret = st.data[len(st.data)-1]
+	st.data = st.data[:len(st.data)-1]
+	return
+}
+```
+
+**Memory & stateDB**
+
+Memory类为EVM实现了一个简单的内存模型。它主要在执行合约时针对operation进行一些内存里的参数拷贝。
+
+```
+// Memory implements a simple memory model for the ethereum virtual machine.
+type Memory struct {
+	// 内存
+	store       []byte
+	// 最后一次的gas花费
+	lastGasCost uint64
+}
+
+// NewMemory returns a new memory memory model.
+func NewMemory() *Memory {
+	return &Memory{}
+}
+```
+
+## 总结
+
+当有这样一段智能合约代码：
+
+```solidity
+pragma solidity ^0.4.0;
+contract SimpleStorage {
+    uint storedData;
+
+    function set(uint x) public {
+        storedData = x;
+    }
+
+    function get() public returns (uint) {
+        return storedData;
+    }
+}
+```
+
+在Remix编译器进行编译后得到字节码：
+
+```
+{
+	"object": "606060405260a18060106000396000f360606040526000357c01000000000000000000000000000000000000000000000000000000009004806360fe47b11460435780636d4ce63c14605d57603f565b6002565b34600257605b60048080359060200190919050506082565b005b34600257606c60048050506090565b6040518082815260200191505060405180910390f35b806000600050819055505b50565b60006000600050549050609e565b9056",
+	"opcodes": "PUSH1 0x60 PUSH1 0x40 MSTORE PUSH1 0xA1 DUP1 PUSH1 0x10 PUSH1 0x0 CODECOPY PUSH1 0x0 RETURN PUSH1 0x60 PUSH1 0x40 MSTORE PUSH1 0x0 CALLDATALOAD PUSH29 0x100000000000000000000000000000000000000000000000000000000 SWAP1 DIV DUP1 PUSH4 0x60FE47B1 EQ PUSH1 0x43 JUMPI DUP1 PUSH4 0x6D4CE63C EQ PUSH1 0x5D JUMPI PUSH1 0x3F JUMP JUMPDEST PUSH1 0x2 JUMP JUMPDEST CALLVALUE PUSH1 0x2 JUMPI PUSH1 0x5B PUSH1 0x4 DUP1 DUP1 CALLDATALOAD SWAP1 PUSH1 0x20 ADD SWAP1 SWAP2 SWAP1 POP POP PUSH1 0x82 JUMP JUMPDEST STOP JUMPDEST CALLVALUE PUSH1 0x2 JUMPI PUSH1 0x6C PUSH1 0x4 DUP1 POP POP PUSH1 0x90 JUMP JUMPDEST PUSH1 0x40 MLOAD DUP1 DUP3 DUP2 MSTORE PUSH1 0x20 ADD SWAP2 POP POP PUSH1 0x40 MLOAD DUP1 SWAP2 SUB SWAP1 RETURN JUMPDEST DUP1 PUSH1 0x0 PUSH1 0x0 POP DUP2 SWAP1 SSTORE POP JUMPDEST POP JUMP JUMPDEST PUSH1 0x0 PUSH1 0x0 PUSH1 0x0 POP SLOAD SWAP1 POP PUSH1 0x9E JUMP JUMPDEST SWAP1 JUMP ",
+	"sourceMap": "24:189:0:-;;;;;;;;;",
+	"linkReferences": {}
+}
+```
+
+其中，opcodes字段便是合约代码编译后的操作码集合。
+
+以PUSH1 0x60为例，可以在jump_table.go中找到对应的operation:
+
+```
+PUSH1: {
+			execute:       makePush(1, 1),
+			gasCost:       gasPush,
+			validateStack: makeStackFunc(0, 1),
+			valid:         true,
+		}
+```
+
+此时EVM就会去执行makePush函数，同时通过gasPush计算该操作需要的gas费用。EVM内部通过pop不断进行出栈操作来处理整个操作码集，当栈为空的时候表示整个合约代码执行完毕得到最后的执行结果。

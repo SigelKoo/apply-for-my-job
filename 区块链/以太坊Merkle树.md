@@ -245,3 +245,125 @@ k = log(n)
 
 MPT 时间复杂度 O(log(n))
 
+# 源码
+
+```
+type (
+	// 分支节点，它的结构体现了原生trie的设计特点
+	fullNode struct {
+		Children [17]node // 17个子节点，其中16个为0x0-0xf;第17个子节点存放数据
+		flags    nodeFlag // 缓存节点的Hash值，同时标记dirty值来决定节点是否必须写入数据库
+	}
+	// 扩展节点和叶子节点，它的结构体现了PatriciaTrie的设计特点
+	// 区别在于扩展节点的value指向下一个节点的hash值(hashNode)；叶子节点的value是数据的RLP编码(valueNode)
+	shortNode struct {
+		Key   []byte
+		Val   node
+		flags nodeFlag
+	}
+	// 节点哈希，用于实现节点的折叠
+	hashNode  []byte
+	// 存储数据
+	valueNode []byte
+)
+```
+
+首先看MPT树新建：
+
+```go
+func New(root common.Hash, db *Database) (*Trie, error) {
+	if db == nil {
+		panic("trie.New called without a database")
+	}
+	trie := &Trie{
+		db: db,
+	}
+	// 如果根哈希不为空，说明是从数据库加载一个已经存在的MPT树
+	if root != (common.Hash{}) && root != emptyRoot {
+		rootnode, err := trie.resolveHash(root[:], nil)
+		if err != nil {
+			return nil, err
+		}
+		trie.root = rootnode
+	}
+    // 否则，直接返回的是新建的MPT树
+	return trie, nil
+}
+```
+
+MPT树的插入：
+
+```go
+func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error) {
+	if len(key) == 0 {
+		if v, ok := n.(valueNode); ok {
+			return !bytes.Equal(v, value.(valueNode)), value, nil
+		}
+		return true, value, nil
+	}
+	switch n := n.(type) {
+	case *shortNode:
+        // 如果是叶子节点，首先计算共有前缀
+		matchlen := prefixLen(key, n.Key)
+        // 1.1如果共有前缀和当前的key一样，说明节点已经存在  只更新节点的value即可
+		if matchlen == len(n.Key) {
+			dirty, nn, err := t.insert(n.Val, append(prefix, key[:matchlen]...), key[matchlen:], value)
+			if !dirty || err != nil {
+				return false, n, err
+			}
+			return true, &shortNode{n.Key, nn, t.newFlag()}, nil
+		}
+		// 1.2构造形成一个分支节点(fullNode)
+		branch := &fullNode{flags: t.newFlag()}
+		var err error
+        // 1.3将原来的节点拆作新的后缀shortNode插入
+		_, branch.Children[n.Key[matchlen]], err = t.insert(nil, append(prefix, n.Key[:matchlen+1]...), n.Key[matchlen+1:], n.Val)
+		if err != nil {
+			return false, nil, err
+		}
+        // 1.4将新节点作为shortNode插入
+		_, branch.Children[key[matchlen]], err = t.insert(nil, append(prefix, key[:matchlen+1]...), key[matchlen+1:], value)
+		if err != nil {
+			return false, nil, err
+		}
+		// 1.5如果没有共有的前缀，则新建的分支节点为根节点
+		if matchlen == 0 {
+			return true, branch, nil
+		}
+		// 1.6如果有共有的前缀，则拆分原节点产生前缀叶子节点为根节点
+		return true, &shortNode{key[:matchlen], branch, t.newFlag()}, nil
+
+	case *fullNode:
+        // 2如果是分支节点，则直接将新数据插入作为子节点
+		dirty, nn, err := t.insert(n.Children[key[0]], append(prefix, key[0]), key[1:], value)
+		if !dirty || err != nil {
+			return false, n, err
+		}
+		n = n.copy()
+		n.flags = t.newFlag()
+		n.Children[key[0]] = nn
+		return true, n, nil
+
+	case nil:
+        // 3空节点，直接返回该值得叶子节点作为根节点
+		return true, &shortNode{key, value, t.newFlag()}, nil
+
+	case hashNode:
+        // 4.1哈希节点 表示当前节点还未加载到内存中，首先需要调用resolveHash从数据库中加载节点
+		rn, err := t.resolveHash(n, prefix)
+		if err != nil {
+			return false, nil, err
+		}
+        // 4.2然后在该节点后插入新节点
+		dirty, nn, err := t.insert(rn, prefix, key, value)
+		if !dirty || err != nil {
+			return false, rn, err
+		}
+		return true, nn, nil
+
+	default:
+		panic(fmt.Sprintf("%T: invalid node: %v", n, n))
+	}
+}
+```
+
