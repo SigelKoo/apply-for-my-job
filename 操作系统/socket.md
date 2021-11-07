@@ -4,6 +4,24 @@ Socket 是实现“打开–读/写–关闭”这样的模式，以使用 TCP �
 
 ![img](https://segmentfault.com/img/remote/1460000022734663)
 
+## 加上epoll的流程
+
+```c
+int s = socket(AF_INET, SOCK_STREAM, 0);   
+bind(s, ...)
+listen(s, ...)
+
+int epfd = epoll_create(...);
+epoll_ctl(epfd, ...); //将所有需要监听的socket添加到epfd中
+
+while(1){
+    int n = epoll_wait(...)
+    for(接收到数据的socket){
+        //处理
+    }
+}
+```
+
 ## socket错误码
 
 ETIMEOUT：110
@@ -120,4 +138,16 @@ func main() {
     }
 }
 ```
+
+# 与三次握手对应
+
+客户端调用connect的时候，就是发一个syn
+
+服务端accept的时候，实际上是从内核的accept队列里面取一个连接，如果这个队列为空，则进程阻塞（阻塞模式下）。如果accept返回则说明成功取到一个连接，返回到应用层。
+
+大致的过程是客户端发一个syn之后，服务端将这个连接放入到backlog队列，在收到客户端的ack之后将这个请求移到accept队列。
+
+所以accept一定是发生在三次握手之后，connect只是发一个syn而已
+
+![img](https://img2018.cnblogs.com/blog/1169746/201810/1169746-20181001231741928-751354816.png)
 

