@@ -231,3 +231,29 @@ func chanRange(chanName chan int) {
 }
 ```
 
+# 锁与channel的选择
+
+面对一个并发问题的时候，应当选择合适的并发方式：channel还是mutex。**选择的依据是他们的能力/特性：channel的能力是让数据流动起来，擅长的是数据流动的场景**，《Channel or Mutex》中给了3个数据流动的场景：
+
+1. 传递数据的所有权，即把某个数据发送给其他协程
+2. 分发任务，每个任务都是一个数据
+3. 交流异步结果，结果是一个数据
+
+**mutex的能力是数据不动，某段时间只给一个协程访问数据的权限擅长数据位置固定的场景**，《Channel or Mutex》中给了2个数据不动场景：
+
+1. 缓存
+2. 状态，我们银行例子中的`map`就是一种状态
+
+**提供解决并发问题的一个思路**：
+
+1. 先找到数据的流动，并且还要画出来，数据流动的路径换成channel，channel的两端设计成协程
+2. 基于画出来的图设计简要的channel方案，代码需要做什么
+3. 这个方案是不是有点复杂，是不是用Mutex更好一点？设计一个简要的Mutex方案，对比&选择易做的、高效的
+
+### channel + mutex思维
+
+面对并发问题，除了**channel or mutex**，你还有另外一个选择：**channel plus mutex**。
+
+一个大并发问题，可以分解成很多小的并发问题，每个小的并发都可以单独选型：channel or mutex。但对于整个大的问题，通常不是channel or mutex，而是channel plus mutex。
+
+*如果你是认为是channel and mutex也行，但我更喜欢plus，体现相互配合*。
