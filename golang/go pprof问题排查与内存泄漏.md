@@ -715,5 +715,7 @@ goroutine泄露的本质是channel阻塞，无法继续向下执行，导致此g
    3. 期待从channel读数据，结果没有goroutine写
 2. select操作，select里也是channel操作，如果所有case上的操作阻塞，goroutine也无法继续执行。
 
+# 内存泄漏是虚拟内存还是物理内存
 
+内存泄漏导致进程的虚拟内存不断增加，而由于申请后未被访问使用，所以并不会映射到物理内存中占用资源。
 
