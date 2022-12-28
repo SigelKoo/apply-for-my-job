@@ -35,7 +35,7 @@ string数据结构跟切片有些类似，只不过切片还有一个表示容�
 
 ### string操作
 
-可以声明一个string变量变赋予初值：
+可以声明一个string变量被赋予初值：
 
 ```go
 var str string

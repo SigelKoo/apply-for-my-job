@@ -1,39 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="ALL" />
+  </component>
   <component name="ChangeListManager">
     <list default="true" id="673deeeb-9a94-4617-ac92-95aba23b52b9" name="Default Changelist" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/apply-for-my-job.iml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统10.简述操作系统中的缺页中断.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统10.简述操作系统中的缺页中断.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统11.简述几个常用的Linux命令以及他们的功能。.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统11.简述几个常用的Linux命令以及他们的功能。.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统12.线程有多少种状态，状态之间如何转换.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统12.线程有多少种状态，状态之间如何转换.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统13.Linux下如何排查CPU以及内存占用过多？.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统13.Linux下如何排查CPU以及内存占用过多？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统14.进程通信中的管道实现原理是什么？.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统14.进程通信中的管道实现原理是什么？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统15.Linux下如何查看CPU荷载，正在运行的进程，某个端口对应的进程？.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统15.Linux下如何查看CPU荷载，正在运行的进程，某个端口对应的进程？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统16.IO多路复用中select,poll,epoll之间有什么区别，各自支持的最大描述符上限以及原因是什么？.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统16.IO多路复用中select,poll,epoll之间有什么区别，各自支持的最大描述符上限以及原因是什么？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统17.简述自旋锁与互斥锁的使用场景.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统17.简述自旋锁与互斥锁的使用场景.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统18.简述traceroute命令的原理.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统18.简述traceroute命令的原理.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统23.BIO、NIO有什么区别？怎么判断写文件时Buffer已经写满？简述Linux的IO模型.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统23.BIO、NIO有什么区别？怎么判断写文件时Buffer已经写满？简述Linux的IO模型.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统3.简述socket中select与epoll的使用场景以及区别，epoll中水平触发以及边缘触发有什么不同？.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统3.简述socket中select与epoll的使用场景以及区别，epoll中水平触发以及边缘触发有什么不同？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统36.系统调用的过程是怎样的？操作系统是通过什么机制触发系统调用的？.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统36.系统调用的过程是怎样的？操作系统是通过什么机制触发系统调用的？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统39.简述Linux的IO模型.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统39.简述Linux的IO模型.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统8.线程间有哪些通信方式？.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统8.线程间有哪些通信方式？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/操作系统/操作系统9.什么时候会由用户态陷入内核态？.md" beforeDir="false" afterPath="$PROJECT_DIR$/操作系统/操作系统9.什么时候会由用户态陷入内核态？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/数据库/数据库1.MySQL为什么使用B+树来作索引，对比B-树它的优点和缺点是什么？.md" beforeDir="false" afterPath="$PROJECT_DIR$/数据库/数据库1.MySQL为什么使用B+树来作索引，对比B-树它的优点和缺点是什么？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/数据库/数据库25.MySQL的索引什么情况下会失效？.md" beforeDir="false" afterPath="$PROJECT_DIR$/数据库/数据库25.MySQL的索引什么情况下会失效？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/数据库/数据库35.联合索引的存储结构是什么？.md" beforeDir="false" afterPath="$PROJECT_DIR$/数据库/数据库35.联合索引的存储结构是什么？.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/数据库/数据库36.数据库如何设计索引，如何优化查询？.md" beforeDir="false" afterPath="$PROJECT_DIR$/数据库/数据库36.数据库如何设计索引，如何优化查询？.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/apply-for-my-job.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/apply-for-my-job.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/golang/channel读写特性.md" beforeDir="false" afterPath="$PROJECT_DIR$/golang/channel读写特性.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/golang/go string.md" beforeDir="false" afterPath="$PROJECT_DIR$/golang/go string.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
-  <component name="GOROOT" path="C:\Go" />
   <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="main" />
+      </map>
+    </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
   </component>
   <component name="ProjectId" id="1psSj9OH4CMOO7FPAOHduhfKG9Z" />
   <component name="ProjectViewState">
@@ -42,13 +33,29 @@
   </component>
   <component name="PropertiesComponent">
     <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
+    <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
     <property name="WebServerToolWindowFactoryState" value="false" />
+    <property name="go.format.on.save.advertiser.fired" value="true" />
+    <property name="go.formatter.settings.were.checked" value="true" />
     <property name="go.import.settings.migrated" value="true" />
+    <property name="go.modules.go.list.on.any.changes.was.set" value="true" />
     <property name="go.sdk.automatically.set" value="true" />
-    <property name="last_opened_file_path" value="$USER_HOME$" />
+    <property name="go.watchers.conflict.with.on.save.actions.check.performed" value="true" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$" />
   </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
 </project>
